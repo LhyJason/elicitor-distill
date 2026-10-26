@@ -224,7 +224,7 @@ worker processes forked from it can deadlock.
 | Loss | assistant turn only |
 | Learning rate | 2e-4 (0.6B, 1.7B), 1e-4 (4B); cosine, 3 % warm-up |
 | Batch | effective 32 |
-| Epochs | 3 (update), 5 (judge); the offline metrics of §7.1 on the validation set after each epoch pick the checkpoint |
+| Epochs | 3 (update; 2 for the 4B, §12), 5 (judge); the offline metrics of §7.1 on the validation set after each epoch pick the checkpoint |
 | Other | seed 0; gradient checkpointing on the 0.6B only (the larger models' activations fit in the A40's 48 GB, and without it a step is about a third cheaper); validation generation in batches of 128 for the larger models |
 
 No hyper-parameter search, no full fine-tuning, one GPU. Weights are downloaded on a login
@@ -406,6 +406,6 @@ CI downloads no weights.
 | Zero-shot students produce invalid JSON | schema-constrained decoding keeps the pipeline running; unconstrained validity is a reported metric |
 | A student's ρ ranks question types differently, so `eig` asks other questions | a finding, not a bug; the question-sequence agreement is reported |
 | GGUF conversion of a merged Qwen3 model fails | the export chain is proven on the 0.6B first; fallback: Ollama importing the safetensors folder directly |
-| 4B training over 1 h | smaller per-device batch, 2 epochs; else the 4B stays zero-shot only, noted here |
+| 4B training over 1 h | smaller per-device batch, 2 epochs; else the 4B stays zero-shot only, noted here. *Applied 10-26:* the 1.7B trains at 2.9 s a step without gradient checkpointing, so the 4B's three epochs would take about an hour on their own; it trains for 2 |
 | Few de-duplicated eval `update` records (< 2,000) | the test-set offline table is reported with its wide CIs; the end-to-end layer carries the conclusion |
 | Elicitor lacks an interface | patch release of Elicitor, pin moved; no code copied |
