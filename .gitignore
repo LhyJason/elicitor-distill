@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Collected teacher data, run outputs and logs (the SFT sets in data/sft/ are committed)
+data/raw/
+results/
+logs/
+*.sqlite
+
+# Model weights are never committed (SPEC §13)
+models/
+*.gguf
+*.safetensors
+
+# Site-specific cluster settings
+cluster/local.env

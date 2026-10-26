@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elicitor-distill"
+dynamic = ["version"]
+description = "Distilling the LLM roles of the Elicitor agent into small open models."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    # Pinned to the commit the experiments are built on (SPEC §1).
+    "elicitor @ git+https://github.com/LhyJason/elicitor@41358e44bb27644d3cf4f4fc2188115a8d7e0c6a",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+# Training stack; exact versions are pinned in M2 (SPEC §5).
+train = [
+    "accelerate>=1.0",
+    "datasets>=3.0",
+    "peft>=0.13",
+    "torch>=2.4",
+    "transformers>=4.51",
+    "trl>=0.12",
+]
+
+[project.scripts]
+distill = "elicitor_distill.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "elicitor_distill.__version__" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
