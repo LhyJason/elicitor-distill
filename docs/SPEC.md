@@ -389,6 +389,16 @@ hypothesis to the data. What each verdict reads:
 - *D6*: `distill bench` on one A40 each, 200 validation samples, 16 workers, SFT 1.7B Q8_0
   against qwen3:32b; it holds when the student's requests per second are ≥ 5 × the teacher's.
 
+*M3 job (code 10-26).* `cluster/e2e.sbatch`: GPU 0 serves the seven M2 models at once
+(`AGENT_MAX_LOADED=7`), GPUs 1–3 the simulator. In `m5_full` the simulator made 6,000 new
+requests and the updater 4,553 (the rest were cache hits), so a student run pays its own
+`update` calls and only the answers to questions the teacher's runs never asked. Per model, in
+parallel: `elicitor calibrate` with the m5_smoke file and a copy of its calibration cache (only
+`update` is new), `distill m3-file` with the rounded rho, `elicitor run` with a copy of
+`m5_full`'s cache, `elicitor health`. Beside them the test-set offline table, without the
+unconstrained pass (reported on validation, §7.1). Then `compare`, `judge-eval`, and `bench` on
+GPU 0 alone, one model at a time.
+
 ## 8. Repo layout and tooling
 
 ```text
@@ -396,7 +406,7 @@ src/elicitor_distill/
   data.py        domain copy and checksums        personas.py   make-personas
   splits.py      split guard                      collect.py    teacher data (M1)
   judge_collect.py (M1)   sft_data.py (M1)        train.py export.py eval_offline.py bench.py (M2)
-  compare.py judge_eval.py (M3)                   cli.py
+  m3.py compare.py judge_eval.py (M3)             cli.py
 configs/       training configs (M2)       experiments/  collection, calibration, end-to-end files (M1, M3)
 cluster/       Slurm scripts (M1)          data/         travel/ (copy), personas_train.jsonl, sft/
 tests/         split guard, data, mock collection and SFT building, statistics on known data
@@ -442,7 +452,7 @@ CI downloads no weights.
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
 | M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. **Smoke 10-25** (8 personas, 2 / 2 GPUs, 38 min): health OK, 0 failed calls, 0 parse failures in every role; 160 backstories (166 calls, 510 s) frozen in `data/backstories.jsonl` (SHA-256 `ddc1c8a3…92fa4e2`); seconds per attempt: update 3.7, simulate 54.3, judge 45.6. Full job: one answer seed, 1 / 3 GPUs (Q7). **Done 10-26** (4 h 21 min): health OK in both steps, 0 failed calls, 0 parse failures, 0 transport errors; 7,740 `update` (1,680 cache hits) and 7,740 `simulate` in 2 h 52 min, 4,300 `judge` in 1 h 29 min; seconds per attempt update 10.6, simulate 34.3, judge 39.5; leaking answers 11 % (train) and 9 % (dev). SFT sets frozen (`data/sft/MANIFEST.json` has the full hashes): `update_train` 5,704 rows from 7,200 records (1,496 duplicate prompts, mostly short answers that several personas gave alike), SHA-256 `9951b9abe9a9…`; `update_val` 516 from 540, `760d47af2f57…`; `judge_train` 4,000, `0f5fe1891629…`; `judge_val` 300, `233df3710610…`. Judge bins (train): 784 / 989 / 984 / 854 / 389 |
 | M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU; run where the `train` extra is installed, not in CI). **Done 10-26:** seven models created (three `update` students, the judge student, three zero-shot bases), each answering its 20 smoke samples with 0 parse failures and passing `check-template`; the validation table is in §7.1; SFT 4B agreement 0.974 against zero-shot 4B 0.923. Training on one A40 (best epoch by validation agreement, or judge MAE): 0.6B 1,339 s (3 epochs, best 2), 1.7B 1,549 s (3, best 2), 4B 2,116 s (2, best 2; about 100 s of selection per epoch), judge 1.7B 2,207 s (5, best 4). Found on the way: llama.cpp's conversion needs sentencepiece (§5); Ollama 0.24 logs prompts only at trace level (§6); the 70B judge ceiling needs 4 parallel slots on one A40 (§9) |
-| M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found |
+| M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found. **Frozen 10-26** (§7.4). **Code 10-26:** `build-test` (the test sets from `m5_full` and `m7_judge`, behind `--allow-eval`; `eval-offline` and `bench` refuse a test file without it), `m3-file` (one model's file from a template, with its measured rho), `compare`, `judge-eval`; the templates `experiments/m3_calibrate.toml` (m5_smoke's file) and `m3_e2e.toml` (m5_full's, cut to the two arms); `cluster/e2e.sbatch`; 46 tests (6 new: the chain on Elicitor's mock provider, and the one-sided bound on known data). Code size 2,028 lines without blank, comment and docstring lines (2,709 physical) |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |
 | M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student | one job of at most 2 h, hypotheses written here first |
 

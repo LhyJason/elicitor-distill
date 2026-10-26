@@ -52,6 +52,19 @@ distill bench --model elicitor-upd-1.7b-sft              # requests per second
 
 `distill eval-offline --provider mock --model mock` runs the evaluation without a server.
 
+## End to end (M3)
+
+The hypotheses were frozen in the SPEC (§7.4) before any of this ran. `cluster/e2e.sbatch`
+runs the whole evaluation in one job; Elicitor's run folders are read, never written:
+
+```bash
+distill build-test --m5 ~/elicitor/results/m5_full --judge ~/elicitor/results/m7_judge     --allow-eval                                          # the test sets: eval personas
+distill m3-file experiments/m3_e2e.toml --model elicitor-upd-1.7b-sft --name e2e_upd-1.7b-sft     --calibration results/m3/upd-1.7b-sft/calibration/calibration.json     --out experiments/m3/e2e_upd-1.7b-sft.toml            # the model's own rho for eig
+elicitor run experiments/m3/e2e_upd-1.7b-sft.toml --out results/m3/upd-1.7b-sft/run
+distill compare results/m3/*/run --teacher ~/elicitor/results/m5_full --out results/m3/compare
+distill judge-eval results/m3/judge-1.7b-sft/judge_test   # D5
+```
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Model weights are not released (see the license note in the SPEC).

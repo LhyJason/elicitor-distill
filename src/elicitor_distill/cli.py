@@ -16,6 +16,7 @@ from elicitor_distill.collect import RAW_DIR
 from elicitor_distill.data import DOMAIN, verify_domain_data
 from elicitor_distill.eval_offline import ROLES as EVAL_ROLES
 from elicitor_distill.export import MODELS_DIR, OUTTYPE
+from elicitor_distill.m3 import TEST_DIR
 from elicitor_distill.personas import (
     N_TRAIN,
     TRAIN_SEED,
@@ -23,6 +24,7 @@ from elicitor_distill.personas import (
     write_train_personas,
 )
 from elicitor_distill.sft_data import ROLES, SFT_DIR
+from elicitor_distill.splits import EVAL, EvalSplitError
 
 DEFAULT_URL = "http://127.0.0.1:11434"
 
@@ -126,6 +128,10 @@ def _val_samples(args: argparse.Namespace) -> list[dict[str, Any]]:
 
     path = args.data or f"{SFT_DIR}/{args.role}_val.jsonl.gz"
     samples = read_sft(path)
+    if not getattr(args, "allow_eval", False) and any(
+        s["meta"].get("split") == EVAL for s in samples
+    ):
+        raise EvalSplitError(f"{path} holds eval personas (the test set); pass --allow-eval")
     return samples[: args.limit] if args.limit else samples
 
 
@@ -226,6 +232,42 @@ def _bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_test(args: argparse.Namespace) -> int:
+    from elicitor_distill.m3 import build_test
+
+    counts = build_test(args.m5, args.judge, args.data_dir, _schema(args.data_dir), args.out,
+                        allow_eval=args.allow_eval)  # fmt: skip
+    print(", ".join(f"{role}_test: {n} samples" for role, n in counts.items()))
+    return 0
+
+
+def _m3_file(args: argparse.Namespace) -> int:
+    from elicitor_distill.m3 import write_m3_file
+
+    print(json.dumps(write_m3_file(args.template, args.out, args.name, args.model,
+                                   args.calibration)))  # fmt: skip
+    return 0
+
+
+def _compare(args: argparse.Namespace) -> int:
+    from elicitor_distill.compare import compare
+
+    result = compare(args.teacher, args.runs, args.out)
+    print(Path(args.out, "results.md").read_text(encoding="utf-8").split("\n\n### Every")[0])
+    return 0 if result["rows"] else 1
+
+
+def _judge_eval(args: argparse.Namespace) -> int:
+    from elicitor_distill.judge_eval import judge_table, markdown
+
+    text = markdown(judge_table(args.folders))
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8", newline="\n")
+    print(text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="distill", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -297,6 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--workers", type=int, default=workers)
         p.add_argument("--data-dir", default="data", help="folder holding <domain>/")
         p.add_argument("--out", help="output folder (eval-offline) or JSON file (bench)")
+        p.add_argument("--allow-eval", action="store_true", help="read a test set (M3 only)")
         p.set_defaults(func=func)
         return p
 
@@ -318,6 +361,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data", help="SFT file the logged requests came from")
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=_check_template)
+
+    p = sub.add_parser("build-test", help="the M3 test sets from Elicitor's m5_full and m7_judge")
+    p.add_argument("--m5", required=True, help="Elicitor's m5_full run folder (read only)")
+    p.add_argument("--judge", required=True, help="Elicitor's m7_judge folder (read only)")
+    p.add_argument("--out", default=TEST_DIR, help=f"output folder (default: {TEST_DIR})")
+    p.add_argument("--data-dir", default="data", help="folder holding <domain>/ (default: data)")
+    p.add_argument("--allow-eval", action="store_true", help="required: reads the test set")
+    p.set_defaults(func=_build_test)
+
+    p = sub.add_parser("m3-file", help="one model's calibration or end-to-end experiment file")
+    p.add_argument("template", help="experiments/m3_calibrate.toml or experiments/m3_e2e.toml")
+    p.add_argument("--model", required=True, help="the served agent model")
+    p.add_argument("--name", required=True, help="experiment name (the run folder's)")
+    p.add_argument("--out", required=True, help="file to write")
+    p.add_argument("--calibration", help="calibration.json whose LLM rho the selectors use")
+    p.set_defaults(func=_m3_file)
+
+    p = sub.add_parser("compare", help="student runs against the teacher's m5_full, paired")
+    p.add_argument("runs", nargs="+", help="student run folders")
+    p.add_argument("--teacher", required=True, help="Elicitor's m5_full run folder (read only)")
+    p.add_argument("--out", required=True, help="table and figure folder")
+    p.set_defaults(func=_compare)
+
+    p = sub.add_parser("judge-eval", help="D5: judge Spearman with utility on the test set")
+    p.add_argument("folders", nargs="+", help="eval-offline folders of the judge test set")
+    p.add_argument("--out", help="markdown file")
+    p.set_defaults(func=_judge_eval)
     return parser
 
 

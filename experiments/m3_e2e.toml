@@ -1,0 +1,36 @@
+# M3 end-to-end template (SPEC §7.3, Decision Q11): Elicitor's m5_full.toml at the pinned commit,
+# cut to the arms sel=eig,upd=llm,phr=tpl and sel=random,upd=llm,phr=tpl (K = 3 / 5 / 8, 5
+# replicates, the 48 eval personas, seed 8000), so every episode pairs with the teacher's by
+# common random numbers. `distill m3-file` replaces the name, the agent model, the data folder
+# and the eig selector's rho (the model's own, from its calibration). The job copies m5_full's
+# reply cache into the run folder first: a question the teacher asked gets its answer for free.
+# The rho below is the teacher's, so this file as it stands reruns the teacher's two arms.
+
+name = "m3_e2e"
+domain = "travel"
+data_dir = "../data"
+split = "eval"
+seed = 8000
+replicates = 5
+budgets = [3, 5, 8]
+tau = 0.9
+selectors = ["eig", "random"]
+updaters = ["llm"]
+phrasers = ["tpl"]
+
+[simulator]
+kind = "llm"
+
+[selector.eig]
+rho = { open = 0.99, choice = 0.97, yesno = 0.85 }
+
+[llm]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"  # replaced by ELICITOR_SERVERS_AGENT / _USER in the job
+num_ctx = 2048
+think = { agent = false }  # qwen3 thinks unless told not to; llama3.3 has no thinking mode
+timeout = 600
+
+[llm.models]
+agent = "qwen3:32b"
+user = "llama3.3:latest"  # the 70B Q4_K_M (42.5 GB); the shared model folder has no :70b tag
