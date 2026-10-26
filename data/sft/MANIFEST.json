@@ -1,0 +1,60 @@
+{
+  "teachers": {
+    "update": [
+      "qwen3:32b"
+    ],
+    "judge": [
+      "llama3.3:latest"
+    ]
+  },
+  "files": {
+    "update_train.jsonl.gz": {
+      "rows": 5704,
+      "records": 7200,
+      "personas": 160,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 1496
+      },
+      "sha256": "9951b9abe9a97da521cbad6fd1eab0d8857d8b0e40ad04eb1c8a60b4733ca004",
+      "sha256_jsonl": "1c2af97f197709009d1f488394cf9d6be06f840efb26f88fb0a15a69f60a2b35"
+    },
+    "update_val.jsonl.gz": {
+      "rows": 516,
+      "records": 540,
+      "personas": 12,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 24
+      },
+      "sha256": "760d47af2f57506d664fc9dd535ec39703dee02e03e0ad96608e0c2a8785e30b",
+      "sha256_jsonl": "d8cf52c9a8d8ad89952ec1c5db00915e6aab393be8f0c38053c82adfee65120c"
+    },
+    "judge_train.jsonl.gz": {
+      "rows": 4000,
+      "records": 4000,
+      "personas": 160,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 0
+      },
+      "sha256": "0f5fe1891629ad4f299ea3ae568d06791b8a82561364696f9e5c0f36b7e8acfd",
+      "sha256_jsonl": "0376efc7c44aaa034312725a3c9ce611d8444b99a4a69454464e3474a5e31e90"
+    },
+    "judge_val.jsonl.gz": {
+      "rows": 300,
+      "records": 300,
+      "personas": 12,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 0
+      },
+      "sha256": "233df37106108ab0d8181cd669d088ce8e5976d82cf4a403e537e22c521af0bf",
+      "sha256_jsonl": "d2b42844351da59cb73871ac80c3da2fc842e27bcf6c0a67eb681278b88d9d19"
+    }
+  }
+}
