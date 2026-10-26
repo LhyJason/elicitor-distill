@@ -19,13 +19,12 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.6"]
 # Training stack (SPEC §5): plain `transformers.Trainer` with this package's own tokenisation.
 # The GGUF conversion also needs llama.cpp's `gguf-py` (`pip install <llama.cpp>/gguf-py`).
-# Pinned to the versions the training chain is tested with (SPEC §5); torch only from
-# below, since its CUDA build has to suit the cluster's driver.
+# Pinned to the versions the training chain is tested with (SPEC §5).
 train = [
     "accelerate==1.15.0",
     "peft==0.21.2",
     "safetensors==0.8.0",
-    "torch>=2.4",
+    "torch==2.14.1",
     "transformers==5.20.2",
 ]
 

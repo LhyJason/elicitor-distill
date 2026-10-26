@@ -268,7 +268,6 @@ def train(
         seed=config.seed,
         data_seed=config.seed,
         report_to="none",
-        dataloader_num_workers=2,
     )
     collator = DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=IGNORE,
                                       pad_to_multiple_of=8)  # fmt: skip

@@ -209,9 +209,11 @@ completion is the rest of the full conversation's rendering (the teacher's JSON 
 end-of-turn token). Prompt and completion are tokenised separately, as at serving time, and the
 loss is on the completion. A checkpoint is saved per epoch; each is scored on the validation set
 by greedy, unconstrained generation (argmax agreement for `update`, score MAE for `judge`; ties
-go to the earlier epoch), and the best adapter is kept. Versions (`train` extra): transformers 5.20.2, peft 0.21.2,
-accelerate 1.15.0, safetensors 0.8.0, the set the training test was first run with; torch is pinned once the
-cluster's CUDA build is chosen.
+go to the earlier epoch), and the best adapter is kept. Versions (`train` extra): torch 2.14.1 (the
+default CUDA 13 build; the cluster's A40 driver is 595.71), transformers 5.20.2, peft 0.21.2,
+accelerate 1.15.0, safetensors 0.8.0; llama.cpp at `d854d98ba` (tag b11889) with its `gguf-py`
+0.19.0. The tiny-model test passes with them on a cluster GPU node (10-26). The data loader runs
+in the training process: worker processes forked from it can deadlock.
 
 | Setting | Value |
 |---|---|
