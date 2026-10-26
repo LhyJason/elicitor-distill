@@ -133,12 +133,15 @@ def export(
 
 # ---------------------------------------------------------------- template check
 
-_PROMPT = re.compile(r'msg="chat request".*?\sprompt=("(?:[^"\\]|\\.)*")')
+# Ollama 0.24 logs the rendered prompt only at trace level (`OLLAMA_DEBUG=2`), as
+# `msg="completion request" prompt="..."`; its debug line carries the length (`prompt=1757`),
+# which the quote requirement skips. Older servers logged `msg="chat request"` at debug level.
+_PROMPT = re.compile(r'msg="(?:chat|completion) request".*?\sprompt=("(?:[^"\\]|\\.)*")')
 
 
 def ollama_prompts(log_text: str) -> list[str]:
-    """The rendered prompts an Ollama server logged at debug level (`OLLAMA_DEBUG`), in order.
-    The log quotes them Go-style, which JSON reads for the escapes that occur in prompts."""
+    """The rendered prompts an Ollama server logged (`OLLAMA_DEBUG=2`), in order. The log
+    quotes them Go-style, which JSON reads for the escapes that occur in prompts."""
     return [json.loads(m.group(1)) for m in _PROMPT.finditer(log_text)]
 
 

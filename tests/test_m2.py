@@ -169,11 +169,15 @@ def _go_quote(text: str) -> str:
 
 def test_check_prompts_reads_the_debug_log(update_val):
     samples = update_val[:3]
-    lines = [
-        'time=2026-10-26T10:00:00Z level=DEBUG source=routes.go:1 msg="chat request" images=0 '
-        f"prompt={_go_quote(serving_prompt(s['messages'][:2]))}"
-        for s in samples
-    ]
+    lines = []
+    for s in samples:  # Ollama 0.24: the length at debug level, the prompt at trace level
+        prompt = serving_prompt(s["messages"][:2])
+        lines += [
+            'time=2026-10-26T10:00:00Z level=DEBUG source=server.go:1580 msg="completion request" '
+            f'images=0 prompt={len(prompt)} format="{{}}"',
+            'time=2026-10-26T10:00:00Z level=TRACE source=server.go:1581 msg="completion request" '
+            f"prompt={_go_quote(prompt)}",
+        ]
     log = "\n".join(["level=INFO msg=starting", *lines])
     assert ollama_prompts(log) == [serving_prompt(s["messages"][:2]) for s in samples]
     assert check_prompts(ollama_prompts(log), samples) == []

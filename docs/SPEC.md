@@ -256,7 +256,11 @@ reply), for every student and baseline. The teacher's Ollama template differs (i
 own training (§5), and the baselines get Qwen3's native format. Greedy decoding is kept free of
 a repeat penalty (`repeat_penalty 1`). `distill check-template` closes the loop: the job's
 server logs every rendered prompt (`OLLAMA_DEBUG=2`), and the smoke test's 20 must equal the
-training rendering.
+training rendering. Ollama 0.24 logs the prompt only at trace level (`msg="completion request"`;
+the debug line has its length), along with a line per token encoded or decoded, about 18 MB a
+request (found 10-26: 4 GB in the first minutes of a full evaluation). Those lines are dropped
+before the log is written, and only the smoke test and the check run on the tracing server; the
+evaluation restarts it quietly.
 
 ## 7. Evaluation
 

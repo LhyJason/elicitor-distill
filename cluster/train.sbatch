@@ -12,7 +12,8 @@
 # Steps: `distill train` (students only) → `distill export --create` into the agent group's
 # writable model folder → a 20-sample smoke test (one worker, no cache, 0 parse failures) →
 # `distill check-template` on the prompts the server logged → `distill eval-offline` on the
-# validation set (both roles for a baseline) into results/m2/<name>/<role>/.
+# validation set (both roles for a baseline) into results/m2/<name>/<role>/. A student whose
+# models/<name>/selection.json exists is not trained again (a rerun after a failed export).
 set -eo pipefail
 source cluster/job_setup.sh
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
@@ -46,9 +47,14 @@ else
     roles=(update judge)  # a baseline is one model for both roles
 fi
 model="elicitor-$name"
-log="logs/ollama-${SLURM_JOB_ID:-local}.log"
-MODELS_DIR="$AGENT_OLLAMA_MODELS" PARALLEL=8 SERVER_LOG="$log" OLLAMA_DEBUG=2 \
-    source cluster/serve_one.sh
+job="${SLURM_JOB_ID:-local}"
+serve() {  # one Ollama server logging to $1 at OLLAMA_DEBUG level $2
+    MODELS_DIR="$AGENT_OLLAMA_MODELS" PARALLEL=8 SERVER_LOG="$1" OLLAMA_DEBUG="$2" \
+        source cluster/serve_one.sh
+}
+# The checks run on a trace-level server, the only level at which Ollama 0.24 logs the rendered
+# prompt; the evaluation runs on a quiet one, since tracing every token slows the server down.
+serve "logs/ollama-$job-trace.log" 2
 trap stop_server EXIT
 
 start=$(date +%s)
@@ -58,12 +64,18 @@ echo "export: $(( $(date +%s) - start )) s"
 
 status=0
 for role in "${roles[@]}"; do
-    before=$(wc -l < "$log")
+    before=$(wc -l < "logs/ollama-$job-trace.log")
     distill eval-offline --model "$model" --role "$role" --base-url "$SERVER_URL" \
         --limit 20 --workers 1 --strict --no-unconstrained || status=1
-    tail -n +"$((before + 1))" "$log" > "logs/prompts-${SLURM_JOB_ID:-local}-$role.log"
-    distill check-template --log "logs/prompts-${SLURM_JOB_ID:-local}-$role.log" \
-        --role "$role" --limit 20 || status=1
+    tail -n +"$((before + 1))" "logs/ollama-$job-trace.log" \
+        | grep -aE 'msg="(chat|completion) request"' > "logs/prompts-$job-$role.log" || true
+    distill check-template --log "logs/prompts-$job-$role.log" --role "$role" --limit 20 \
+        || status=1
+done
+stop_server
+serve "logs/ollama-$job.log" 0
+
+for role in "${roles[@]}"; do
     distill eval-offline --model "$model" --role "$role" --base-url "$SERVER_URL" \
         --workers 8 --out "results/m2/$name/$role" || status=1
 done
