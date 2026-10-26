@@ -1,15 +1,16 @@
 # M1 teacher data (SPEC §4, Q6, Q7): the update records of the 160 training personas (train set)
-# and Elicitor's 12 dev personas (validation set), 45 calibration questions x 2 answer seeds per
-# persona, and 25 judge units per persona. Never the eval personas. One job of at most 6 h on 4
-# GPUs. Submit from the repo root:
-#   cluster/submit.sh cluster/collect.sbatch
+# and Elicitor's 12 dev personas (validation set), 45 calibration questions x 1 answer seed per
+# persona (Q7: cut from 2 after the smoke run), and 25 judge units per persona. Never the eval
+# personas. One job of at most 6 h on 4 GPUs, three of them for the simulator's group. Submit
+# from the repo root:
+#   AGENT_GPUS=1 USER_GPUS=3 cluster/submit.sh cluster/collect.sbatch
 
 name = "collect"
 domain = "travel"
 data_dir = "../data"
 seed = 20261026
 splits = ["train", "dev"]
-answer_seeds = 2
+answer_seeds = 1
 
 [judge]
 edges = [0.5, 0.6, 0.7, 0.8]  # utility bins < 0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, >= 0.8

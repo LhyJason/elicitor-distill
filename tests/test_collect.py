@@ -47,8 +47,14 @@ provider = "mock"
 
 @pytest.fixture
 def workspace(tmp_path, data_dir):
-    """A copy of data/ and a mock collection file beside it, as in the repo."""
-    shutil.copytree(data_dir, tmp_path / "data", ignore=shutil.ignore_patterns("raw", "sft"))
+    """A copy of data/ and a mock collection file beside it, as in the repo, without the frozen
+    training backstories (the tests write their own; Elicitor's in travel/ stay)."""
+
+    def ignore(folder, names):
+        top = Path(folder) == Path(data_dir)
+        return {n for n in names if n in ("raw", "sft") or (top and n == "backstories.jsonl")}
+
+    shutil.copytree(data_dir, tmp_path / "data", ignore=ignore)
     (tmp_path / "experiments").mkdir()
     path = tmp_path / "experiments" / "mock.toml"
     path.write_text(MOCK_FILE, encoding="utf-8")

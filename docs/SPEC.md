@@ -16,7 +16,7 @@ changes. Milestone rows (§10) record what each milestone actually found.
 | Q4 | Student models | Qwen3-0.6B, 1.7B and 4B, thinking off | settled |
 | Q5 | Distillation method | sequence-level: LoRA SFT on the teacher's JSON replies | settled |
 | Q6 | Training data | 160 new training personas; Elicitor's 12 dev personas for validation; its 48 eval personas are the test set | settled |
-| Q7 | Question sampling | 45 calibration-style questions per persona × 2 answer seeds | settled |
+| Q7 | Question sampling | 45 calibration-style questions per persona × 1 answer seed (cut from 2 after the smoke run) | settled |
 | Q8 | Training data in the repo | yes, gzipped JSONL | settled |
 | Q9 | Serving the students | merged LoRA → GGUF → Ollama, same provider as the teacher | settled |
 | Q10 | Quantisation | Q8_0 on the cluster; Q4_K_M for the 4B on a laptop; zero-shot baselines converted the same way | settled |
@@ -133,10 +133,17 @@ qwen3, `num_ctx` 2048), so the training data is what the production prompt produ
 > yes/no answers. LLM-phrased questions are not sampled: phrasing had no effect in Elicitor.
 > Cost: about 29,000 teacher requests (simulate + update), fully parallel; the smoke run decides
 > whether the job fits 6 h.
+>
+> *M1 (10-25), first cut of §12:* **one answer seed**. The smoke run (8 personas, 2 / 2 GPUs)
+> drew 720 pairs in 1,385 s: the simulator (70B, 54 s per attempt under load) is the bottleneck,
+> the updater (3.7 s) is not. Two seeds would take about 10 h with the judge collection, and
+> still about 6.8 h with the split moved to 1 / 3. One seed with the 1 / 3 split: train
+> 160 × 45 = 7,200 pairs, validation 12 × 45 = 540, about 4.1 h. The second seed would have
+> added about 87 % new pairs (10–13 % of the smoke pairs repeated an answer).
 
 **Collection file.** `experiments/collect.toml` drives every collection command: the splits
 (`train` and `dev`; the file loader rejects `eval`, and the split guard stands behind it), the
-collection seed 20261026, two answer seeds, the judge bins, and an `[llm]` table identical to
+collection seed 20261026, one answer seed (Q7), the judge bins, and an `[llm]` table identical to
 `m5_full.toml`'s. `collect_smoke.toml` is the same file cut to the first 4 personas of each
 split; `collect_mock.toml` runs the dev personas on Elicitor's mock provider in CI.
 
@@ -317,11 +324,11 @@ CI downloads no weights.
   a model folder per group (`AGENT_OLLAMA_MODELS`, `USER_OLLAMA_MODELS`, both defaulting to
   `OLLAMA_MODELS`). The collection serves both teachers from the shared folder.
 - Collection: `collect.sbatch` runs `make-backstories` (if the file is missing), `collect`,
-  `judge-collect` and `build-sft`. About 35,000 requests: 15,480 `simulate` and up to 15,480
-  `update`, 4,300 `judge`, 160 `backstory`. The smoke file runs first; its seconds per attempt
-  per role decide the GPU split between the groups (`AGENT_GPUS` / `USER_GPUS`, 2 / 2 by default;
-  the user group carries the 70B model and 56 % of the requests) and whether the full file fits
-  6 h, else §12's cuts apply.
+  `judge-collect` and `build-sft`. About 20,000 requests: 7,740 `simulate` and up to 7,740
+  `update`, 4,300 `judge` (the 160 backstories are written once and committed). The smoke file
+  runs first; its seconds per attempt per role decide the GPU split between the groups
+  (`AGENT_GPUS` / `USER_GPUS`, 2 / 2 by default; the user group carries the 70B model) and
+  whether the full file fits 6 h, else §12's cuts apply. The full job runs with 1 / 3 (Q7).
 - Jobs: `collect.sbatch` (4 GPUs, 6 h) → `train.sbatch` × 6 (1 GPU, 1 h each) → export (CPU) →
   `e2e.sbatch` (4 GPUs, 4 h: calibrate, the runs, bench). Each ends with a health check.
 - Elicitor's run folders (`m5_full`, `m5_smoke`, `m7_judge`) are read, never written; the reply
@@ -334,7 +341,7 @@ CI downloads no weights.
 | M | Content | Done when |
 |---|---|---|
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
-| M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. The job is pending |
+| M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. **Smoke 10-25** (8 personas, 2 / 2 GPUs, 38 min): health OK, 0 failed calls, 0 parse failures in every role; 160 backstories (166 calls, 510 s) frozen in `data/backstories.jsonl` (SHA-256 `ddc1c8a3…92fa4e2`); seconds per attempt: update 3.7, simulate 54.3, judge 45.6. Full job: one answer seed, 1 / 3 GPUs (Q7). The full job is pending |
 | M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3) |
 | M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |

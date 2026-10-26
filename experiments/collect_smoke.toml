@@ -1,6 +1,7 @@
 # M1 smoke collection (SPEC §4, §12): the first 4 personas of each split, to measure the
-# request rate and decide whether the full collection fits 6 h. Its records go to a folder of
-# their own; the reply cache is not shared with the full job. Submit from the repo root:
+# request rate and decide whether the full collection fits 6 h. Equal to the full file but for its
+# size; the 10-25 run drew 2 answer seeds (SPEC Q7 records its rates). Its records go to a folder
+# of their own; the reply cache is not shared with the full job. Submit from the repo root:
 #   cluster/submit.sh cluster/collect.sbatch experiments/collect_smoke.toml
 
 name = "collect_smoke"
@@ -8,7 +9,7 @@ domain = "travel"
 data_dir = "../data"
 seed = 20261026
 splits = ["train", "dev"]
-answer_seeds = 2
+answer_seeds = 1
 max_personas = 4
 
 [judge]
