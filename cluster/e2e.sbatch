@@ -6,15 +6,18 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x-%j.log
 # M3 (SPEC §7, §9, §10): the end-to-end job, at most 4 h on 4 GPUs, after D1-D6 were frozen.
-# GPU 0 serves the seven M2 models from the agent group's folder (AGENT_GPUS=1), GPUs 1-3 the
-# simulator llama3.3 (USER_GPUS=3), since only the simulator's answers to questions the teacher
-# never asked are new. Elicitor's run folders (ELICITOR_RESULTS, default ~/elicitor/results:
+# GPU 0 serves the M2 models from the agent group's folder (AGENT_GPUS=1), one at a time: the
+# cluster's GPUs are in exclusive-process mode and Ollama runs each model in a process of its
+# own, so a second model cannot load beside the first (found 10-26: "CUDA-capable device(s) is/are
+# busy or unavailable"); Ollama swaps them on request. GPUs 1-3 serve the simulator llama3.3
+# (USER_GPUS=3), since only the simulator's answers to questions the teacher never asked are new. Elicitor's run folders (ELICITOR_RESULTS, default ~/elicitor/results:
 # m5_full, m5_smoke_calibration, m7_judge) are read, never written; their reply caches are copied.
 # Steps:
 #   1. `distill build-test`: the update and judge test sets (the first read of eval data);
-#   2. per update model, in parallel: `elicitor calibrate` on the dev personas (m5_smoke's file,
-#      the model as agent) → `distill m3-file` with the measured rho → `elicitor run` of the two
-#      arms (m5_full's settings) → `elicitor health`; beside them the test-set offline table;
+#   2. per model, one after another (the SFT students first): `elicitor calibrate` on the dev
+#      personas (m5_smoke's file, the model as agent) → `distill m3-file` with the measured rho →
+#      `elicitor run` of the two arms (m5_full's settings) → `elicitor health`, and beside the
+#      run the model's test-set offline tables;
 #   3. `distill compare` against m5_full, `distill judge-eval` (D5), the test table;
 #   4. `distill bench` on GPU 0 alone: the SFT students, then qwen3:32b (D6);
 #   5. the tables to results_summary/m3/.
@@ -31,8 +34,8 @@ for f in "$src/m5_full/run_state.json" "$src/m5_smoke_calibration/llm_cache.sqli
 done
 if [[ -z "$AGENT_OLLAMA_MODELS" ]]; then echo "set AGENT_OLLAMA_MODELS" >&2; exit 2; fi
 mkdir -p logs "$out" experiments/m3 results_summary/m3
-UPDATE=(upd-0.6b-sft upd-1.7b-sft upd-4b-sft qwen3-0.6b-zs qwen3-1.7b-zs qwen3-4b-zs)
-JUDGE=(judge-1.7b-sft qwen3-0.6b-zs qwen3-1.7b-zs qwen3-4b-zs)  # the SFT judge first (D5)
+UPDATE=(upd-1.7b-sft upd-4b-sft upd-0.6b-sft qwen3-4b-zs qwen3-1.7b-zs qwen3-0.6b-zs)
+JUDGE=(judge-1.7b-sft qwen3-4b-zs qwen3-1.7b-zs qwen3-0.6b-zs)  # the SFT judge first (D5)
 start=$(date +%s)
 since() { echo "$1: $(( $(date +%s) - start )) s since the start"; }
 
@@ -42,18 +45,9 @@ fi
 sha256sum "$out"/test/*.jsonl.gz
 
 export CONFIG=experiments/m3_e2e.toml AGENT_GPUS=${AGENT_GPUS:-1} USER_GPUS=${USER_GPUS:-3}
-export AGENT_MODEL_OVERRIDE=elicitor-upd-1.7b-sft AGENT_MAX_LOADED=7 REQUIRE_GPU=1
+export AGENT_MODEL_OVERRIDE=elicitor-${UPDATE[0]} REQUIRE_GPU=1
 source cluster/serve_models.sh
 trap stop_models EXIT
-for name in "${UPDATE[@]}" judge-1.7b-sft; do
-    for url in "${agent_urls[@]}"; do load_model "$url" "elicitor-$name"; done
-done
-for url in "${agent_urls[@]}"; do
-    loaded=$(OLLAMA_HOST="${url#http://}" ollama ps); echo "$loaded"
-    if [[ $(echo "$loaded" | tail -n +2 | grep -c "100% GPU") != 7 ]]; then
-        echo "not all seven models sit fully on the agent GPU" >&2; exit 1
-    fi
-done
 agent_url=${agent_urls[0]}
 since "servers"
 
@@ -80,21 +74,24 @@ offline() {  # $1 name, $2 role: the test-set offline table of one model
         --allow-eval --base-url "$agent_url" --workers 8 --no-unconstrained --out "$dir"
 }
 
-pids=()
-for name in "${UPDATE[@]}"; do
-    chain "$name" > "logs/e2e-${SLURM_JOB_ID:-local}-$name.log" 2>&1 & pids+=($!)
-done
-{
-    for name in "${UPDATE[@]}"; do offline "$name" update || echo "offline $name update failed"; done
-    for name in "${JUDGE[@]}"; do offline "$name" judge || echo "offline $name judge failed"; done
-} > "logs/e2e-${SLURM_JOB_ID:-local}-offline.log" 2>&1 & pids+=($!)
+# One model at a time on the agent GPU; its run and its offline tables share the loaded model.
+# Each step runs in the background so that `set -e` holds inside it (it is off in `a || b`).
 status=0
-for pid in "${pids[@]}"; do wait "$pid" || status=1; done
-since "runs and offline tables (exit $status)"
-for name in "${UPDATE[@]}"; do
-    echo "== $name"; tail -n 25 "logs/e2e-${SLURM_JOB_ID:-local}-$name.log"
+log="logs/e2e-${SLURM_JOB_ID:-local}"
+for name in "${UPDATE[@]}" judge-1.7b-sft; do
+    pids=()
+    if [[ "$name" != judge-* ]]; then
+        chain "$name" > "$log-$name.log" 2>&1 & pids+=($!)
+        offline "$name" update > "$log-$name-offline.log" 2>&1 & pids+=($!)
+    fi
+    if [[ " ${JUDGE[*]} " == *" $name "* ]]; then
+        offline "$name" judge > "$log-$name-judge.log" 2>&1 & pids+=($!)
+    fi
+    for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+    since "$name (exit status so far $status)"
+    tail -n 25 "$log-$name.log" 2>/dev/null || true
+    grep -ahE "health|^\{" "$log-$name"-*.log || true
 done
-grep -aE "health|failed|^\{" "logs/e2e-${SLURM_JOB_ID:-local}-offline.log" || true
 
 runs=(); for name in "${UPDATE[@]}"; do runs+=("$out/$name/run"); done
 judged=(); for name in "${JUDGE[@]}"; do judged+=("$out/$name/judge_test"); done

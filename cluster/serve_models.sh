@@ -7,9 +7,8 @@
 #   CONFIG=experiments/collect.toml source cluster/serve_models.sh
 # Settings (environment): AGENT_GPUS and USER_GPUS (servers per model group, default 2 each),
 # AGENT_PARALLEL and USER_PARALLEL (OLLAMA_NUM_PARALLEL, default 8 and 4), REQUIRE_GPU=1 to stop
-# when a model does not sit fully on its GPU. M3 (several students on one agent server):
-# AGENT_MAX_LOADED (OLLAMA_MAX_LOADED_MODELS of the agent servers, default 1) and AGENT_MODEL_OVERRIDE
-# (the agent model loaded at start instead of the file's). With AGENT_GPUS=0 both groups share one server
+# when a model does not sit fully on its GPU, AGENT_MODEL_OVERRIDE for the agent model loaded at
+# start instead of the file's (M3, which serves several students in turn). With AGENT_GPUS=0 both groups share one server
 # (and then need the same model folder).
 # Afterwards ELICITOR_SERVERS_AGENT / _USER list the servers, OLLAMA_PIDS their process ids and
 # stop_models stops them.
@@ -26,7 +25,6 @@ print(llm["models"]["agent"], llm["models"]["user"], llm.get("num_ctx", 4096))
 PY
 )
 AGENT_MODEL=${AGENT_MODEL_OVERRIDE:-$AGENT_MODEL}
-AGENT_MAX_LOADED=${AGENT_MAX_LOADED:-1}
 AGENT_MODELS_DIR=${AGENT_OLLAMA_MODELS:-$OLLAMA_MODELS}
 USER_MODELS_DIR=${USER_OLLAMA_MODELS:-$OLLAMA_MODELS}
 echo "model folders: agent $AGENT_MODELS_DIR, user $USER_MODELS_DIR"
@@ -76,7 +74,7 @@ if [[ "$AGENT_GPUS" == 0 ]]; then
     user_urls+=("$SERVER_URL")
 else
     for ((i = 0; i < AGENT_GPUS; i++)); do
-        start_server "$i" "$AGENT_PARALLEL" "$AGENT_MAX_LOADED" "$AGENT_MODELS_DIR" || return 1
+        start_server "$i" "$AGENT_PARALLEL" 1 "$AGENT_MODELS_DIR" || return 1
         agent_urls+=("$SERVER_URL")
     done
     for ((i = AGENT_GPUS; i < AGENT_GPUS + USER_GPUS; i++)); do

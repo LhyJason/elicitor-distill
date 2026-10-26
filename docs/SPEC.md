@@ -389,13 +389,15 @@ hypothesis to the data. What each verdict reads:
 - *D6*: `distill bench` on one A40 each, 200 validation samples, 16 workers, SFT 1.7B Q8_0
   against qwen3:32b; it holds when the student's requests per second are ≥ 5 × the teacher's.
 
-*M3 job (code 10-26).* `cluster/e2e.sbatch`: GPU 0 serves the seven M2 models at once
-(`AGENT_MAX_LOADED=7`), GPUs 1–3 the simulator. In `m5_full` the simulator made 6,000 new
-requests and the updater 4,553 (the rest were cache hits), so a student run pays its own
-`update` calls and only the answers to questions the teacher's runs never asked. Per model, in
-parallel: `elicitor calibrate` with the m5_smoke file and a copy of its calibration cache (only
-`update` is new), `distill m3-file` with the rounded rho, `elicitor run` with a copy of
-`m5_full`'s cache, `elicitor health`. Beside them the test-set offline table, without the
+*M3 job (code 10-26).* `cluster/e2e.sbatch`: GPU 0 serves the M2 models one at a time, the
+SFT students first, GPUs 1–3 the simulator. The cluster's GPUs are in exclusive-process mode and
+Ollama runs every model in a process of its own, so a second model cannot load beside the first
+(found 10-26 by the first submission, which stopped after 46 s). In `m5_full` the simulator made
+6,000 new requests and the updater 4,553 (the rest were cache hits), so a student run pays its
+own `update` calls and only the answers to questions the teacher's runs never asked. Per model:
+`elicitor calibrate` with the m5_smoke file and a copy of its calibration cache (only `update` is
+new), `distill m3-file` with the rounded rho, `elicitor run` with a copy of `m5_full`'s cache,
+`elicitor health`, and beside the run the model's test-set offline tables, without the
 unconstrained pass (reported on validation, §7.1). Then `compare`, `judge-eval`, and `bench` on
 GPU 0 alone, one model at a time.
 
