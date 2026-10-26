@@ -211,9 +211,10 @@ loss is on the completion. A checkpoint is saved per epoch; each is scored on th
 by greedy, unconstrained generation (argmax agreement for `update`, score MAE for `judge`; ties
 go to the earlier epoch), and the best adapter is kept. Versions (`train` extra): torch 2.14.1 (the
 default CUDA 13 build; the cluster's A40 driver is 595.71), transformers 5.20.2, peft 0.21.2,
-accelerate 1.15.0, safetensors 0.8.0; llama.cpp at `d854d98ba` (tag b11889) with its `gguf-py`
-0.19.0. The tiny-model test passes with them on a cluster GPU node (10-26). The data loader runs
-in the training process: worker processes forked from it can deadlock.
+accelerate 1.15.0, safetensors 0.8.0, sentencepiece 0.2.1 (imported by llama.cpp's Qwen vocabulary
+code); llama.cpp at `d854d98ba` (tag b11889) with its `gguf-py` 0.19.0. The tiny-model test
+passes with them on a cluster GPU node (10-26). The data loader runs in the training process:
+worker processes forked from it can deadlock.
 
 | Setting | Value |
 |---|---|
@@ -224,7 +225,7 @@ in the training process: worker processes forked from it can deadlock.
 | Learning rate | 2e-4 (0.6B, 1.7B), 1e-4 (4B); cosine, 3 % warm-up |
 | Batch | effective 32 |
 | Epochs | 3 (update), 5 (judge); the offline metrics of §7.1 on the validation set after each epoch pick the checkpoint |
-| Other | gradient checkpointing, seed 0 |
+| Other | seed 0; gradient checkpointing on the 0.6B only (the larger models' activations fit in the A40's 48 GB, and without it a step is about a third cheaper); validation generation in batches of 128 for the larger models |
 
 No hyper-parameter search, no full fine-tuning, one GPU. Weights are downloaded on a login
 node and loaded offline on the compute node.

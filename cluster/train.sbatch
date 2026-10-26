@@ -29,9 +29,14 @@ with open(sys.argv[1], "rb") as f:
 print(c["name"], c["role"], c["base"].split("/")[-1])
 PY
 )
-    start=$(date +%s)
-    distill train "$1" --base-dir "$HF_DIR"
-    echo "train: $(( $(date +%s) - start )) s"
+    if [[ -f "models/$name/selection.json" ]]; then
+        # a finished training run is kept; delete models/<name> to train again
+        echo "train: reusing models/$name/adapter (best epoch of models/$name/selection.json)"
+    else
+        start=$(date +%s)
+        distill train "$1" --base-dir "$HF_DIR"
+        echo "train: $(( $(date +%s) - start )) s"
+    fi
     adapter=(--adapter "models/$name/adapter")
     roles=("$role")
 else

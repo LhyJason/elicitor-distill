@@ -14,3 +14,5 @@ learning_rate = 2e-4
 per_device_batch = 8
 grad_accum = 4  # effective batch 32
 max_new_tokens = 150  # the judge role's max_tokens
+gradient_checkpointing = false  # activations fit in 48 GB; SPEC §5
+eval_batch = 128  # validation generation per epoch; memory-bound, so wider is faster

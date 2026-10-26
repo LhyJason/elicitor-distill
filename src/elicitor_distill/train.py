@@ -44,7 +44,7 @@ IGNORE = -100  # label of a token the loss skips
 LORA_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
 _KEYS = {"name", "role", "base", "train", "val", "max_length", "epochs", "learning_rate",
          "per_device_batch", "grad_accum", "warmup", "seed", "max_new_tokens", "eval_batch",
-         "lora"}  # fmt: skip
+         "gradient_checkpointing", "lora"}  # fmt: skip
 _LORA_KEYS = {"r", "alpha", "dropout", "targets"}
 
 Progress = Callable[[str], None]
@@ -66,6 +66,7 @@ class TrainConfig:
     seed: int = 0
     max_new_tokens: int = 300  # the role's max_tokens in Elicitor
     eval_batch: int = 32
+    gradient_checkpointing: bool = True  # off where activations fit: about a third faster
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -259,7 +260,7 @@ def train(
         lr_scheduler_type="cosine",
         warmup_steps=math.ceil(config.warmup * steps),
         bf16=torch.cuda.is_available(),
-        gradient_checkpointing=True,
+        gradient_checkpointing=config.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         train_sampling_strategy="group_by_length",  # less padding; the order is still seeded
         logging_steps=10,
