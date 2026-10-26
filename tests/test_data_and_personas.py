@@ -1,6 +1,7 @@
 import json
 from collections import Counter
 
+from elicitor.jsonl import read_jsonl
 from elicitor.personas import STYLES, load_personas
 from elicitor.schema import load_schema
 
@@ -38,7 +39,8 @@ def test_training_personas_shape(data_dir):
     assert [p.id for p in personas] == [f"t{i:03d}" for i in range(1, N_TRAIN + 1)]
     assert {p.split for p in personas} == {TRAIN}
     assert Counter(p.style for p in personas) == dict.fromkeys(STYLES, N_TRAIN // len(STYLES))
-    assert all(p.backstory == "" for p in personas)
+    # The persona file has no backstories; they live in backstories.jsonl, written in M1.
+    assert all(row["backstory"] == "" for row in read_jsonl(data_dir / TRAIN_FILE))
     for slot in schema.slots:
         counts = Counter(p.truth[slot.name] for p in personas)
         assert set(counts) == set(slot.value_names)

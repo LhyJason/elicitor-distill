@@ -134,28 +134,56 @@ qwen3, `num_ctx` 2048), so the training data is what the production prompt produ
 > Cost: about 29,000 teacher requests (simulate + update), fully parallel; the smoke run decides
 > whether the job fits 6 h.
 
+**Collection file.** `experiments/collect.toml` drives every collection command: the splits
+(`train` and `dev`; the file loader rejects `eval`, and the split guard stands behind it), the
+collection seed 20261026, two answer seeds, the judge bins, and an `[llm]` table identical to
+`m5_full.toml`'s. `collect_smoke.toml` is the same file cut to the first 4 personas of each
+split; `collect_mock.toml` runs the dev personas on Elicitor's mock provider in CI.
+
+**Backstories (`distill make-backstories`).** The simulator's prompt includes the persona's
+backstory, so training personas get one before any answer is drawn: written once by the
+simulator model with Elicitor's own procedure (`elicitor.backstories`: style and a seeded age,
+never the ground truth; a backstory that names a slot value is redrawn), for all 160 training
+personas, into `data/backstories.jsonl`, where Elicitor's persona loader merges them into
+`personas_train.jsonl`. The file is then frozen (the command refuses to overwrite it without
+`--force`), and `collect` refuses to run while a persona lacks one.
+
 **Collection (`distill collect`).** Uses Elicitor's `LLMClient` and role registry with the
 `[llm]` table of `m5_full.toml`. For every persona: questions → template text → `simulate`
-(seed derived from the collection seed, persona, slot, question and answer index) → `update`
-(seed 0, as in production). One record per pair: persona, split, slot, question, text, answer,
-leaked slots, the teacher's scores and evidence, the teacher model, and **the prompt messages
-the teacher received**, so the SFT prompt is byte-identical to the production prompt. Resumable
-through Elicitor's reply cache; health checked with Elicitor's role statistics (any failed call
-or a parse-failure rate ≥ 1 % fails the job). Leaking answers are kept: the teacher sees them in
-production too.
+(through Elicitor's `LLMSimulator`; seed derived from the collection seed, persona, question and
+answer index) → `update` (seed 0, as in production). The `update` context is built as Elicitor's
+LLM updater builds it; a test checks that both produce the same cache key. One record per pair:
+persona, split, style, slot, question, text, answer, leaked slots, a status (`ok`, `failed`, or
+`empty_answer` when the simulator's reply never validated: the updater makes no call on an empty
+answer), the teacher's scores and evidence, the teacher model, and **the prompt messages the
+teacher received**, so the SFT prompt is byte-identical to the production prompt. Records go to
+`data/raw/<file name>/update_<split>.jsonl` with `update_stats.json` (counts, LLM statistics,
+health problems, the collection file's text). Resumable through Elicitor's reply cache in the
+same folder; health checked with Elicitor's role statistics (any failed call or transport error,
+or a parse-failure rate ≥ 1 %, fails the step). Leaking answers are kept: the teacher sees them
+in production too.
 
 **SFT format (`distill build-sft`).** One chat sample per line: the system and user messages as
 rendered, and the assistant message = the teacher's reply **re-serialised through the role's
 pydantic model** (compact JSON, keys in schema order), so the student learns one canonical
-format. Records of failed teacher calls are dropped; "every value 5, no evidence" records are
-kept (that is the behaviour on an uninformative answer). `meta` holds persona, slot, question
-kind and style for the per-group tables.
+format. Records of failed teacher calls and empty answers are dropped; "every value 5, no
+evidence" records are kept (that is the behaviour on an uninformative answer). A prompt that
+occurs twice in a split (both answer seeds drew the same answer) is kept once: the teacher's
+reply to it is one cached reply, and a duplicate would only weight it. Training personas give
+the `train` set, dev personas the `val` set. `meta` holds persona, style, slot, question kind and
+answer index (update) or item, utility and bin (judge) for the per-group tables. The gzip files
+are byte-reproducible (empty gzip header); `data/sft/MANIFEST.json` records rows, drops and the
+SHA-256 of each file, compressed and not.
 
-**Judge data (`distill judge-collect`).** Units are (training persona, catalog item). Per
-persona 25 items stratified over five utility bins (< 0.5, 0.5–0.6, 0.6–0.7, 0.7–0.8, ≥ 0.8;
-a short bin is filled from its neighbours), so high-utility items are represented; 4,000 judge
-calls (list presentation, user judge). Test set: the 256 units of Elicitor's `m7_judge` (user
-judge, list), whose utility and teacher score already exist; no new calls.
+**Judge data (`distill judge-collect`).** Units are (persona, catalog item). Per persona 25
+items stratified over five utility bins (< 0.5, 0.5–0.6, 0.6–0.7, 0.7–0.8, ≥ 0.8), drawn with a
+generator seeded by persona, so high-utility items are represented. Of the 172 training and dev
+personas 121 have fewer than five items at ≥ 0.8; a short bin is filled from its neighbours, the
+nearer first and the higher of two equally near ones first. Context and prompt are those of
+Elicitor's main judge (user group, list presentation: profile lines and item lines). 4,000 judge
+calls for the training personas and 300 for the dev personas (the `val` set). Test set: the 256
+units of Elicitor's `m7_judge` (user judge, list), whose utility and teacher score already
+exist; no new calls.
 
 > **Decision Q8.** The SFT sets (`data/sft/*.jsonl.gz`, synthetic, a few MB) are committed, so
 > training is reproducible without a cluster. Raw records stay out of the repo.
@@ -277,13 +305,23 @@ docs/SPEC.md  docs/figures/  results_summary/
 
 `src/` layout, pyproject + setuptools, ruff, pytest, GitHub Actions on Linux and Windows. CI
 runs the tests, `make-personas --check`, and (from M1) collection and SFT building on Elicitor's
-mock provider; training is only exercised up to the trainer's construction (`--dry-run`), since
+mock provider (the CLI on the dev personas; the whole chain, backstories included, in the tests
+on a copy of `data/`); training is only exercised up to the trainer's construction (`--dry-run`), since
 CI downloads no weights.
 
 ## 9. Infrastructure
 
 - Cluster: Slurm, A40 48 GB GPUs; one Ollama server per GPU as in Elicitor (two for the agent
   group, two for the user group). Site settings in an untracked `cluster/local.env`.
+- Model folders (Decision Q9): `cluster/serve_models.sh` is Elicitor's script with one change,
+  a model folder per group (`AGENT_OLLAMA_MODELS`, `USER_OLLAMA_MODELS`, both defaulting to
+  `OLLAMA_MODELS`). The collection serves both teachers from the shared folder.
+- Collection: `collect.sbatch` runs `make-backstories` (if the file is missing), `collect`,
+  `judge-collect` and `build-sft`. About 35,000 requests: 15,480 `simulate` and up to 15,480
+  `update`, 4,300 `judge`, 160 `backstory`. The smoke file runs first; its seconds per attempt
+  per role decide the GPU split between the groups (`AGENT_GPUS` / `USER_GPUS`, 2 / 2 by default;
+  the user group carries the 70B model and 56 % of the requests) and whether the full file fits
+  6 h, else §12's cuts apply.
 - Jobs: `collect.sbatch` (4 GPUs, 6 h) → `train.sbatch` × 6 (1 GPU, 1 h each) → export (CPU) →
   `e2e.sbatch` (4 GPUs, 4 h: calibrate, the runs, bench). Each ends with a health check.
 - Elicitor's run folders (`m5_full`, `m5_smoke`, `m7_judge`) are read, never written; the reply
@@ -296,7 +334,7 @@ CI downloads no weights.
 | M | Content | Done when |
 |---|---|---|
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
-| M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here |
+| M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. The job is pending |
 | M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3) |
 | M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |

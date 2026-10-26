@@ -16,6 +16,19 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ruff check . && ruff format --check . && pytest
 distill make-personas --check    # the frozen training personas match the generator
+distill collect experiments/collect_mock.toml --out results/collect_mock   # mock teachers
+```
+
+## Teacher data
+
+`experiments/collect.toml` drives the collection on a GPU cluster (`cluster/collect.sbatch`,
+Ollama servers as in Elicitor):
+
+```bash
+distill make-backstories experiments/collect.toml   # once, then frozen: data/backstories.jsonl
+distill collect experiments/collect.toml --out data/raw/collect         # update records
+distill judge-collect experiments/collect.toml --out data/raw/collect   # judge records
+distill build-sft --raw data/raw/collect                                # data/sft/*.jsonl.gz
 ```
 
 `data/travel/` is a verbatim copy of Elicitor's domain files at the pinned commit (checked

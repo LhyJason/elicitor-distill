@@ -21,3 +21,5 @@ jobs:
       - run: ruff format --check .
       - run: pytest
       - run: distill make-personas --check
+      - run: distill collect experiments/collect_mock.toml --out results/collect_mock --workers 4
+      - run: distill judge-collect experiments/collect_mock.toml --out results/collect_mock --workers 4

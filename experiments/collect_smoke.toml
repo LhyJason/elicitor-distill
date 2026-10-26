@@ -1,0 +1,29 @@
+# M1 smoke collection (SPEC §4, §12): the first 4 personas of each split, to measure the
+# request rate and decide whether the full collection fits 6 h. Its records go to a folder of
+# their own; the reply cache is not shared with the full job. Submit from the repo root:
+#   cluster/submit.sh cluster/collect.sbatch experiments/collect_smoke.toml
+
+name = "collect_smoke"
+domain = "travel"
+data_dir = "../data"
+seed = 20261026
+splits = ["train", "dev"]
+answer_seeds = 2
+max_personas = 4
+
+[judge]
+edges = [0.5, 0.6, 0.7, 0.8]  # utility bins < 0.5, 0.5-0.6, 0.6-0.7, 0.7-0.8, >= 0.8
+per_bin = 5
+
+# Identical to the [llm] table of Elicitor's m5_full.toml at the pinned commit, so the teachers
+# answer exactly as in the full run.
+[llm]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"  # replaced by ELICITOR_SERVERS_AGENT / _USER in the job
+num_ctx = 2048
+think = { agent = false }  # qwen3 thinks unless told not to; llama3.3 has no thinking mode
+timeout = 600
+
+[llm.models]
+agent = "qwen3:32b"
+user = "llama3.3:latest"  # the 70B Q4_K_M (42.5 GB); the shared model folder has no :70b tag

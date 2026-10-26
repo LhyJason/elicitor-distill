@@ -1,0 +1,17 @@
+# Mock collection (SPEC §8): both collection commands on Elicitor's mock provider, in CI; no
+# server. Dev personas only: they come with backstories, and writing mock backstories for the
+# training personas would put them beside the real persona file. The tests run the whole chain,
+# backstories and build-sft included, on a copy of data/.
+#   distill collect experiments/collect_mock.toml --out results/collect_mock
+#   distill judge-collect experiments/collect_mock.toml --out results/collect_mock
+
+name = "collect_mock"
+domain = "travel"
+data_dir = "../data"
+seed = 20261026
+splits = ["dev"]
+answer_seeds = 2
+max_personas = 4
+
+[llm]
+provider = "mock"
