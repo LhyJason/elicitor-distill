@@ -199,8 +199,17 @@ Hygiene: persona ids `t…`; no account names, paths or hostnames in any data fi
 
 ## 5. Training
 
-`transformers` + `peft` + `trl` (`SFTTrainer`) + `datasets` + `accelerate`; versions pinned in
-M2. One config per (role, size) in `configs/`.
+`transformers` (`Trainer`) + `peft` + `accelerate`; versions pinned in M2. One config per
+(role, size) in `configs/`: `update_{0.6b,1.7b,4b}.toml` and `judge_1.7b.toml`.
+
+*M2 (10-26):* `trl` and `datasets` are not used. `distill train` tokenises the samples itself:
+the prompt is rendered with the base model's chat template and `enable_thinking=False`, and every
+rendering must equal the prompt the exported model is served (§6), else training stops; the
+completion is the rest of the full conversation's rendering (the teacher's JSON and the
+end-of-turn token). Prompt and completion are tokenised separately, as at serving time, and the
+loss is on the completion. A checkpoint is saved per epoch; each is scored on the validation set
+by greedy, unconstrained generation (argmax agreement for `update`, score MAE for `judge`; ties
+go to the earlier epoch), and the best adapter is kept.
 
 | Setting | Value |
 |---|---|
@@ -229,10 +238,20 @@ node and loaded offline on the compute node.
 > for the laptop. Zero-shot baselines go through the same HF → GGUF → Ollama path as the
 > students, never through Ollama's library tags.
 
-`distill export` runs the chain and a smoke test: 20 validation samples through Elicitor's
-`update` role with zero parse failures. The Modelfile adds no system prompt or template of its
-own. Students are served with the JSON schema as `format`, like the teacher; the validity of
-unconstrained output is reported separately (§7.1).
+`distill export` runs the chain; the job then runs the smoke test: 20 validation samples
+through Elicitor's role (one worker, no cache) with zero parse failures. The Modelfile adds no
+system prompt. Students are served with the JSON schema as `format`, like the teacher; the
+validity of unconstrained output is reported separately (§7.1).
+
+*M2 (10-26), the chat template:* the Modelfile **sets the template explicitly** instead of
+leaving Ollama to pick one from the GGUF: a system and a user message rendered exactly as
+Qwen3's own template renders them with `enable_thinking=False` (an empty think block opens the
+reply), for every student and baseline. The teacher's Ollama template differs (it appends
+`/no_think` to the user turn when `think` is off), but a student's prompt only has to match its
+own training (§5), and the baselines get Qwen3's native format. Greedy decoding is kept free of
+a repeat penalty (`repeat_penalty 1`). `distill check-template` closes the loop: the job's
+server logs every rendered prompt (`OLLAMA_DEBUG=2`), and the smoke test's 20 must equal the
+training rendering.
 
 ## 7. Evaluation
 
@@ -242,12 +261,20 @@ Validation set during M2; in M3 the **test set** = the de-duplicated `update` re
 Elicitor's eval personas in `m5_full` (rebuilt from each turn's question text, answer and
 `parsed` scores). Per sample, student scores against teacher scores:
 
-- **argmax agreement** (primary; ties count 1/j as in Elicitor's calibration);
+- **argmax agreement** (primary): |S ∩ T| / |S ∪ T| for the student's and the teacher's sets
+  of top values, so 1/j when the student ties j values one of which is the teacher's top (as in
+  Elicitor's calibration) and 1 for the same tie;
 - score MAE on the 0–10 scale; Spearman between the two score vectors;
 - KL(teacher ‖ student) between the normalised likelihoods, the quantity that enters Bayes' rule;
 - JSON validity with and without schema-constrained decoding;
 - all of it by question kind and by answer style;
 - ceiling: the teacher's agreement with itself at a different seed.
+
+The model gets exactly the stored messages through Elicitor's client and role settings (a
+pass-through prompt; seed 0; three attempts; the schema as `format`). A failed call counts as
+equal scores, which is what Elicitor's updater does with one (the belief does not move). Judge
+samples: absolute score error, exact and within-one agreement, and over the samples Spearman of
+the student's score with the teacher's and with the true utility (by utility bin and style).
 
 ### 7.2 Answer reliability against the truth
 
@@ -329,8 +356,12 @@ CI downloads no weights.
   runs first; its seconds per attempt per role decide the GPU split between the groups
   (`AGENT_GPUS` / `USER_GPUS`, 2 / 2 by default; the user group carries the 70B model) and
   whether the full file fits 6 h, else §12's cuts apply. The full job runs with 1 / 3 (Q7).
-- Jobs: `collect.sbatch` (4 GPUs, 6 h) → `train.sbatch` × 6 (1 GPU, 1 h each) → export (CPU) →
-  `e2e.sbatch` (4 GPUs, 4 h: calibrate, the runs, bench). Each ends with a health check.
+- Jobs: `collect.sbatch` (4 GPUs, 6 h) → `train.sbatch` × 7 (1 GPU, 1 h each: the three
+  `update` students, the judge student, and the three zero-shot bases, each from weights to an
+  Ollama model in the agent group's folder, smoke-tested, template-checked and evaluated on the
+  validation set; a base serves both roles) and `teacher.sbatch` (1 GPU, 2 h: the teachers at
+  seed 1, the ceiling) → `e2e.sbatch` (4 GPUs, 4 h: calibrate, the runs, bench). Each ends with
+  a health check.
 - Elicitor's run folders (`m5_full`, `m5_smoke`, `m7_judge`) are read, never written; the reply
   cache is copied before use.
 - Laptop (6 GB GPU): the 1.7B Q8_0 or 4B Q4_K_M student runs under Ollama for
@@ -342,7 +373,7 @@ CI downloads no weights.
 |---|---|---|
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
 | M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. **Smoke 10-25** (8 personas, 2 / 2 GPUs, 38 min): health OK, 0 failed calls, 0 parse failures in every role; 160 backstories (166 calls, 510 s) frozen in `data/backstories.jsonl` (SHA-256 `ddc1c8a3…92fa4e2`); seconds per attempt: update 3.7, simulate 54.3, judge 45.6. Full job: one answer seed, 1 / 3 GPUs (Q7). **Done 10-26** (4 h 21 min): health OK in both steps, 0 failed calls, 0 parse failures, 0 transport errors; 7,740 `update` (1,680 cache hits) and 7,740 `simulate` in 2 h 52 min, 4,300 `judge` in 1 h 29 min; seconds per attempt update 10.6, simulate 34.3, judge 39.5; leaking answers 11 % (train) and 9 % (dev). SFT sets frozen (`data/sft/MANIFEST.json` has the full hashes): `update_train` 5,704 rows from 7,200 records (1,496 duplicate prompts, mostly short answers that several personas gave alike), SHA-256 `9951b9abe9a9…`; `update_val` 516 from 540, `760d47af2f57…`; `judge_train` 4,000, `0f5fe1891629…`; `judge_val` 300, `233df3710610…`. Judge bins (train): 784 / 989 / 984 / 854 / 389 |
-| M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3) |
+| M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU, in CI) |
 | M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |
 | M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student | one job of at most 2 h, hypotheses written here first |

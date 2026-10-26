@@ -17,14 +17,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
-# Training stack; exact versions are pinned in M2 (SPEC §5).
+# Training stack (SPEC §5): plain `transformers.Trainer` with this package's own tokenisation.
+# The GGUF conversion also needs llama.cpp's `gguf-py` (`pip install <llama.cpp>/gguf-py`).
 train = [
     "accelerate>=1.0",
-    "datasets>=3.0",
     "peft>=0.13",
+    "safetensors>=0.4",
     "torch>=2.4",
-    "transformers>=4.51",
-    "trl>=0.12",
+    "transformers>=4.56",
 ]
 
 [project.scripts]

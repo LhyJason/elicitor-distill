@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from elicitor_distill import __version__
+from elicitor_distill.bench import BENCH_N, BENCH_WORKERS
 from elicitor_distill.collect import RAW_DIR
 from elicitor_distill.data import DOMAIN, verify_domain_data
+from elicitor_distill.eval_offline import ROLES as EVAL_ROLES
+from elicitor_distill.export import MODELS_DIR, OUTTYPE
 from elicitor_distill.personas import (
     N_TRAIN,
     TRAIN_SEED,
@@ -17,6 +23,8 @@ from elicitor_distill.personas import (
     write_train_personas,
 )
 from elicitor_distill.sft_data import ROLES, SFT_DIR
+
+DEFAULT_URL = "http://127.0.0.1:11434"
 
 
 def _make_personas(args: argparse.Namespace) -> int:
@@ -107,6 +115,117 @@ def _build_sft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _schema(data_dir: str) -> Any:
+    from elicitor.schema import load_schema
+
+    return load_schema(f"{data_dir}/{DOMAIN}/schema.toml")
+
+
+def _val_samples(args: argparse.Namespace) -> list[dict[str, Any]]:
+    from elicitor_distill.sft_data import read_sft
+
+    path = args.data or f"{SFT_DIR}/{args.role}_val.jsonl.gz"
+    samples = read_sft(path)
+    return samples[: args.limit] if args.limit else samples
+
+
+def _train(args: argparse.Namespace) -> int:
+    from elicitor_distill.train import load_train_config, train
+
+    config = load_train_config(args.config)
+    out = args.out or f"{MODELS_DIR}/{config.name}"
+    result = train(config, _schema(args.data_dir), out, args.base_dir, args.dry_run)
+    if args.dry_run:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"best epoch {result['best_epoch']}: adapter in {out}/adapter")
+    return 0
+
+
+def _export(args: argparse.Namespace) -> int:
+    from elicitor_distill.export import export
+
+    out = Path(args.out or f"{MODELS_DIR}/{args.name.removeprefix('elicitor-')}")
+    adapter = Path(args.adapter) if args.adapter else None
+    info = export(args.name, Path(args.base), adapter, out, Path(args.llama_cpp), args.outtype,
+                  args.create)  # fmt: skip
+    print(json.dumps(info, indent=2))
+    return 0
+
+
+def _eval_client(args: argparse.Namespace, constrained: bool, cache: str | None = None) -> Any:
+    from elicitor_distill.eval_offline import make_eval_client
+
+    return make_eval_client(f"{args.data_dir}/{DOMAIN}/prompts", args.model, args.provider,
+                            args.base_url, args.num_ctx, constrained, cache,
+                            think=None if args.think == "none" else False)  # fmt: skip
+
+
+def _eval_offline(args: argparse.Namespace) -> int:
+    from elicitor.experiments.health import format_roles
+
+    from elicitor_distill.eval_offline import evaluate, strict_problems, write_report
+
+    samples = _val_samples(args)
+    result = evaluate(samples, args.role, _schema(args.data_dir),
+                      lambda constrained: _eval_client(args, constrained),
+                      args.workers, args.seed, not args.no_unconstrained, print)  # fmt: skip
+    data = args.data or f"{SFT_DIR}/{args.role}_val.jsonl.gz"
+    provenance = {"model": args.model, "role": args.role, "data": Path(data).name,
+                  "limit": args.limit, "seed": args.seed}  # fmt: skip
+    if args.out:
+        write_report(args.out, result, provenance)
+    print(format_roles(result["llm"]["roles"]))
+    print(json.dumps(result["tables"]["overall"]))
+    problems = result["problems"] + (strict_problems(result["llm"]) if args.strict else [])
+    if problems:
+        print("health: PROBLEMS")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
+    print("health: OK")
+    return 0
+
+
+def _eval_table(args: argparse.Namespace) -> int:
+    from elicitor_distill.eval_offline import collect_summaries, overview_table
+
+    text = overview_table(collect_summaries(args.root))
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8", newline="\n")
+    print(text)
+    return 0
+
+
+def _check_template(args: argparse.Namespace) -> int:
+    from elicitor_distill.export import check_prompts, ollama_prompts
+
+    logged = ollama_prompts(Path(args.log).read_text(encoding="utf-8", errors="replace"))
+    problems = check_prompts(logged, _val_samples(args))
+    for problem in problems:
+        print(problem)
+    if not problems:
+        print(f"template OK: {len(_val_samples(args))} logged prompts match the serving prompt")
+    return 1 if problems else 0
+
+
+def _bench(args: argparse.Namespace) -> int:
+    from elicitor_distill.bench import bench
+
+    client = _eval_client(args, constrained=True)
+    try:
+        result = bench(client, _val_samples(args), _schema(args.data_dir), args.role, args.workers)
+    finally:
+        client.close()
+    text = json.dumps(result, indent=2)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="distill", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -141,6 +260,64 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-dir", default="data", help="folder holding <domain>/ (default: data)")
     p.add_argument("--roles", nargs="+", choices=ROLES, default=list(ROLES))
     p.set_defaults(func=_build_sft)
+
+    p = sub.add_parser("train", help="LoRA SFT of a student; picks the best epoch on val")
+    p.add_argument("config", help="training TOML file (e.g. configs/update_1.7b.toml)")
+    p.add_argument("--out", help=f"output folder (default: {MODELS_DIR}/<name>)")
+    p.add_argument("--base-dir", help="folder holding the base weights (offline nodes)")
+    p.add_argument("--data-dir", default="data", help="folder holding <domain>/ (default: data)")
+    p.add_argument("--dry-run", action="store_true", help="stop once the trainer is built")
+    p.set_defaults(func=_train)
+
+    p = sub.add_parser("export", help="adapter or base model to GGUF and an Ollama model")
+    p.add_argument("name", help="Ollama model name, e.g. elicitor-upd-1.7b-sft")
+    p.add_argument("--base", required=True, help="folder of the base weights")
+    p.add_argument("--adapter", help="LoRA adapter folder (none: a zero-shot baseline)")
+    p.add_argument("--out", help=f"output folder (default: {MODELS_DIR}/<name without prefix>)")
+    p.add_argument("--llama-cpp", default="llama.cpp", help="llama.cpp checkout")
+    p.add_argument("--outtype", default=OUTTYPE)
+    p.add_argument("--create", action="store_true", help="also `ollama create` the model")
+    p.set_defaults(func=_export)
+
+    def served(name: str, help: str, func: Any, workers: int) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help)
+        p.add_argument("--model", required=True, help="served model name")
+        p.add_argument("--role", choices=EVAL_ROLES, default="update")
+        p.add_argument("--data", help="SFT file (default: data/sft/<role>_val.jsonl.gz)")
+        p.add_argument("--limit", type=int, help="only the first n samples")
+        p.add_argument("--provider", choices=("ollama", "mock"), default="ollama")
+        p.add_argument("--base-url", default=os.environ.get("ELICITOR_BASE_URL", DEFAULT_URL))
+        p.add_argument("--num-ctx", type=int, default=2048)
+        p.add_argument(
+            "--think",
+            choices=("false", "none"),
+            default="false",
+            help="send think=false (qwen3) or no think field (llama3.3)",
+        )
+        p.add_argument("--workers", type=int, default=workers)
+        p.add_argument("--data-dir", default="data", help="folder holding <domain>/")
+        p.add_argument("--out", help="output folder (eval-offline) or JSON file (bench)")
+        p.set_defaults(func=func)
+        return p
+
+    p = served("eval-offline", "agreement of a served model with the teacher", _eval_offline, 8)
+    p.add_argument("--seed", type=int, default=0, help="request seed (1: teacher ceiling)")
+    p.add_argument("--no-unconstrained", action="store_true", help="skip the pass without schema")
+    p.add_argument("--strict", action="store_true", help="fail on any parse failure (smoke)")
+    p = served("bench", "requests per second of a served model", _bench, BENCH_WORKERS)
+    p.set_defaults(limit=BENCH_N)
+
+    p = sub.add_parser("eval-table", help="one table of every eval-offline summary in a folder")
+    p.add_argument("root", help="folder searched for summary.json files")
+    p.add_argument("--out", help="markdown file")
+    p.set_defaults(func=_eval_table)
+
+    p = sub.add_parser("check-template", help="compare Ollama's logged prompts with training's")
+    p.add_argument("--log", required=True, help="Ollama server log written with OLLAMA_DEBUG=2")
+    p.add_argument("--role", choices=EVAL_ROLES, default="update")
+    p.add_argument("--data", help="SFT file the logged requests came from")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=_check_template)
     return parser
 
 

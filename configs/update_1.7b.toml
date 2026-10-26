@@ -1,0 +1,16 @@
+# SPEC §5: LoRA SFT of the Qwen3-1.7B update student on the teacher's
+# replies. One job of at most 1 h on one GPU:
+#   cluster/submit.sh cluster/train.sbatch configs/update_1.7b.toml
+# Every setting not listed here is SPEC §5's default (LoRA r 16, alpha 32, dropout 0.05 on
+# q/k/v/o/gate/up/down; sequence length 1,024; cosine schedule, 3 % warm-up; seed 0).
+
+name = "upd-1.7b-sft"
+role = "update"
+base = "Qwen/Qwen3-1.7B"
+train = "../data/sft/update_train.jsonl.gz"
+val = "../data/sft/update_val.jsonl.gz"
+epochs = 3
+learning_rate = 0.0002
+per_device_batch = 8
+grad_accum = 4  # effective batch 32
+max_new_tokens = 300  # the update role's max_tokens

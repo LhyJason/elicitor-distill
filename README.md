@@ -36,6 +36,22 @@ against `CHECKSUMS.sha256`); `data/personas_train.jsonl` holds this project's 16
 personas. Elicitor's 48 evaluation personas are the test set and are never read before the
 final evaluation.
 
+## Students
+
+`pip install -e ".[train]"` adds the training stack. One config per student in `configs/`;
+`cluster/train.sbatch` runs the whole chain for one model on one GPU:
+
+```bash
+distill train configs/update_1.7b.toml --base-dir ~/hf   # LoRA SFT, best epoch on val
+distill export elicitor-upd-1.7b-sft --base ~/hf/Qwen3-1.7B \
+    --adapter models/upd-1.7b-sft/adapter --llama-cpp ~/llama.cpp --create   # GGUF + Ollama
+distill eval-offline --model elicitor-upd-1.7b-sft --out results/m2/upd-1.7b-sft/update
+distill eval-table results/m2                            # the validation table
+distill bench --model elicitor-upd-1.7b-sft              # requests per second
+```
+
+`distill eval-offline --provider mock --model mock` runs the evaluation without a server.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Model weights are not released (see the license note in the SPEC).
