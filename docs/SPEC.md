@@ -285,6 +285,39 @@ equal scores, which is what Elicitor's updater does with one (the belief does no
 samples: absolute score error, exact and within-one agreement, and over the samples Spearman of
 the student's score with the teacher's and with the true utility (by utility bin and style).
 
+*M2 validation table (10-26).* `update_val` (516) and `judge_val` (300), seed 0, Q8_0 through
+Ollama 0.24 with the schema as `format`, no failed call anywhere; "unconstrained" is the share
+of samples that validate without the schema (three attempts). Ceiling rows are the teachers at
+request seed 1 against their stored seed-0 replies (the 70B judge served with 4 parallel slots,
+§9).
+
+| `update` | agreement | MAE | Spearman | KL | unconstrained |
+|---|---:|---:|---:|---:|---:|
+| zero-shot 0.6B | 0.482 | 3.551 | 0.457 | 0.534 | 0 |
+| zero-shot 1.7B | 0.832 | 1.877 | 0.728 | 0.346 | 0 |
+| zero-shot 4B | 0.923 | 1.486 | 0.808 | 0.262 | 0 |
+| SFT 0.6B | 0.967 | 0.464 | 0.945 | 0.090 | 0.996 |
+| SFT 1.7B | 0.972 | 0.361 | 0.952 | 0.075 | 1 |
+| SFT 4B | 0.974 | 0.326 | 0.959 | 0.060 | 0.988 |
+| ceiling, qwen3:32b | 0.998 | 0.045 | 0.997 | 0.006 | – |
+
+| `judge` | MAE | exact | within 1 | Spearman teacher | Spearman utility | unconstrained |
+|---|---:|---:|---:|---:|---:|---:|
+| zero-shot 0.6B | 5.943 | 0 | 0.017 | 0.309 | 0.266 | 0.753 |
+| zero-shot 1.7B | 2.643 | 0.067 | 0.257 | 0.477 | 0.401 | 0.730 |
+| zero-shot 4B | 1.760 | 0.117 | 0.410 | 0.791 | 0.699 | 0.950 |
+| SFT 1.7B | 0.387 | 0.690 | 0.923 | 0.915 | 0.729 | 1 |
+| ceiling, llama3.3 70B | 0.093 | 0.930 | 0.977 | 0.979 | 0.764 | – |
+
+The teacher's own Spearman with utility on these 300 is 0.756 (0.871 on the 256 test units of
+D5). Read as a preview only, since §7.4 is judged on the test set in M3: SFT agreement is
+monotone in size, with the 1.7B–4B gap (0.002) far below the zero-shot one (0.091); zero-shot 4B
+is already above D1's 0.90 on validation. No zero-shot base produced a single valid `update`
+reply without the schema (1,548 attempts each for the 4B, about 55 tokens a reply, every one
+rejected). Code fences are already tolerated by Elicitor's parser, so the replies break the
+strict model itself (exactly the slot's value names as keys, no extra keys); the raw texts are
+not kept.
+
 ### 7.2 Answer reliability against the truth
 
 `elicitor calibrate` with the student as the agent model, on the dev personas (where it is
@@ -370,7 +403,9 @@ CI downloads no weights.
   Ollama model in the agent group's folder, smoke-tested, template-checked and evaluated on the
   validation set; a base serves both roles) and `teacher.sbatch` (1 GPU, 2 h: the teachers at
   seed 1, the ceiling) → `e2e.sbatch` (4 GPUs, 4 h: calibrate, the runs, bench). Each ends with
-  a health check.
+  a health check. In `teacher.sbatch` each teacher gets its own server; the 70B judge fits on
+  one A40 only with 4 parallel slots, as in the collection (found 10-26: with 8 its cache spilled
+  to the CPU and requests timed out). Its 300 judge calls took 1,104 s.
 - Elicitor's run folders (`m5_full`, `m5_smoke`, `m7_judge`) are read, never written; the reply
   cache is copied before use.
 - Laptop (6 GB GPU): the 1.7B Q8_0 or 4B Q4_K_M student runs under Ollama for
@@ -382,7 +417,7 @@ CI downloads no weights.
 |---|---|---|
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
 | M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. **Smoke 10-25** (8 personas, 2 / 2 GPUs, 38 min): health OK, 0 failed calls, 0 parse failures in every role; 160 backstories (166 calls, 510 s) frozen in `data/backstories.jsonl` (SHA-256 `ddc1c8a3…92fa4e2`); seconds per attempt: update 3.7, simulate 54.3, judge 45.6. Full job: one answer seed, 1 / 3 GPUs (Q7). **Done 10-26** (4 h 21 min): health OK in both steps, 0 failed calls, 0 parse failures, 0 transport errors; 7,740 `update` (1,680 cache hits) and 7,740 `simulate` in 2 h 52 min, 4,300 `judge` in 1 h 29 min; seconds per attempt update 10.6, simulate 34.3, judge 39.5; leaking answers 11 % (train) and 9 % (dev). SFT sets frozen (`data/sft/MANIFEST.json` has the full hashes): `update_train` 5,704 rows from 7,200 records (1,496 duplicate prompts, mostly short answers that several personas gave alike), SHA-256 `9951b9abe9a9…`; `update_val` 516 from 540, `760d47af2f57…`; `judge_train` 4,000, `0f5fe1891629…`; `judge_val` 300, `233df3710610…`. Judge bins (train): 784 / 989 / 984 / 854 / 389 |
-| M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU; run where the `train` extra is installed, not in CI) |
+| M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU; run where the `train` extra is installed, not in CI). **Done 10-26:** seven models created (three `update` students, the judge student, three zero-shot bases), each answering its 20 smoke samples with 0 parse failures and passing `check-template`; the validation table is in §7.1; SFT 4B agreement 0.974 against zero-shot 4B 0.923. Training on one A40 (best epoch by validation agreement, or judge MAE): 0.6B 1,339 s (3 epochs, best 2), 1.7B 1,549 s (3, best 2), 4B 2,116 s (2, best 2; about 100 s of selection per epoch), judge 1.7B 2,207 s (5, best 4). Found on the way: llama.cpp's conversion needs sentencepiece (§5); Ollama 0.24 logs prompts only at trace level (§6); the 70B judge ceiling needs 4 parallel slots on one A40 (§9) |
 | M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |
 | M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student | one job of at most 2 h, hypotheses written here first |
@@ -403,9 +438,9 @@ CI downloads no weights.
 | Risk | Response |
 |---|---|
 | Collection job over 6 h | in order: one answer seed instead of two; 100 training personas; the judge collection moved to its own job |
-| Zero-shot students produce invalid JSON | schema-constrained decoding keeps the pipeline running; unconstrained validity is a reported metric |
+| Zero-shot students produce invalid JSON | schema-constrained decoding keeps the pipeline running; unconstrained validity is a reported metric. *Found 10-26:* without the schema no zero-shot base wrote one valid `update` reply, and 73–95 % of judge replies were valid (§7.1); with it, 0 failed calls |
 | A student's ρ ranks question types differently, so `eig` asks other questions | a finding, not a bug; the question-sequence agreement is reported |
 | GGUF conversion of a merged Qwen3 model fails | the export chain is proven on the 0.6B first; fallback: Ollama importing the safetensors folder directly |
-| 4B training over 1 h | smaller per-device batch, 2 epochs; else the 4B stays zero-shot only, noted here. *Applied 10-26:* the 1.7B trains at 2.9 s a step without gradient checkpointing, so the 4B's three epochs would take about an hour on their own; it trains for 2 |
+| 4B training over 1 h | smaller per-device batch, 2 epochs; else the 4B stays zero-shot only, noted here. *Applied 10-26:* the 1.7B trains at 2.9 s a step without gradient checkpointing, so the 4B's three epochs would take about an hour on their own; it trains for 2 (35 min at 5–7 s a step; training, export, checks and evaluation fit in the 1 h job) |
 | Few de-duplicated eval `update` records (< 2,000) | the test-set offline table is reported with its wide CIs; the end-to-end layer carries the conclusion |
 | Elicitor lacks an interface | patch release of Elicitor, pin moved; no code copied |
