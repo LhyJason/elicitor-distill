@@ -22,7 +22,7 @@ changes. Milestone rows (§10) record what each milestone actually found.
 | Q10 | Quantisation | Q8_0 on the cluster; Q4_K_M for the 4B on a laptop; zero-shot baselines converted the same way | settled |
 | Q11 | End-to-end arms | `sel=eig,upd=llm,phr=tpl` and `sel=random,upd=llm,phr=tpl`, K = 3 / 5 / 8, 5 replicates | settled |
 | Q12 | Non-inferiority margin | −0.02 mass on truth and −0.03 MAP accuracy at K = 5 (one-sided 95 % bootstrap CI) | settled |
-| Q13 | Hypotheses | D1–D6, frozen in this file before the end-to-end job | open until M3 |
+| Q13 | Hypotheses | D1–D6, frozen 10-26 before the end-to-end job (§7.4) | settled |
 | Q14 | Weights and licenses | code MIT; weights not released (Llama 3.3 license naming clause) | settled |
 
 **Also fixed:** Python 3.12. No paid LLM APIs. English README with results. Sole author.
@@ -364,6 +364,30 @@ p50 / p95 latency, GPU memory; the teacher under the same load.
 Predictions, written down to be compared with: D1 holds; D2 holds; D3 holds with the lower
 bound close to the margin; D4 holds on both parts; D5 holds; D6 holds (8–15 ×). If D1 fails,
 the finding is that this role never needed a 32B model, which is reported as such.
+
+**Frozen 10-26**, after M2 and before any test data is read. The hypotheses, thresholds and
+predictions above are those of v1, unchanged: the validation preview (§7.1) already puts zero-shot
+4B at 0.923 agreement, above D1's 0.90, and moving the threshold after seeing that would fit the
+hypothesis to the data. What each verdict reads:
+
+- *Agreement* (D1, D4) is the argmax agreement of the test-set offline table (§7.1): the
+  de-duplicated `update` records of the 48 eval personas in `m5_full`, every arm with the LLM
+  updater, served at seed 0 with the schema as `format`.
+- *Mass on truth at K = 5* (D1) is the paired mean difference model − teacher on the `eig` arm
+  (`sel=eig,upd=llm,phr=tpl`), per persona over the 5 replicates; D1's second part holds when
+  this point estimate is below −0.02.
+- *Non-inferiority* (D2, D3) is Q12 on the `eig` arm at K = 5: the 5th percentile of 10,000
+  bootstrap means (seed 0) of the per-persona differences is above −0.02 for mass on truth and
+  above −0.03 for MAP accuracy; both must hold. The other arm, budgets and metrics are reported,
+  with Holm per metric over every (model, arm, budget), but decide nothing.
+- *D4* holds when the SFT agreements are strictly increasing in size and
+  agreement(SFT 4B) − agreement(SFT 1.7B) < ½ (agreement(zero-shot 4B) − agreement(zero-shot 1.7B)).
+- *D5*: Spearman of the SFT 1.7B judge's score with the true utility, pooled over the 256 units of
+  `m7_judge` (user judge, list presentation), and its CI by resampling personas (10,000 resamples,
+  seed 0), the method that gave the teacher's [0.827, 0.906]; it holds when the 2.5th
+  percentile is ≥ 0.80.
+- *D6*: `distill bench` on one A40 each, 200 validation samples, 16 workers, SFT 1.7B Q8_0
+  against qwen3:32b; it holds when the student's requests per second are ≥ 5 × the teacher's.
 
 ## 8. Repo layout and tooling
 
