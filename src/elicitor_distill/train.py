@@ -261,7 +261,7 @@ def train(
         bf16=torch.cuda.is_available(),
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        group_by_length=True,  # less padding; the order is still seeded
+        train_sampling_strategy="group_by_length",  # less padding; the order is still seeded
         logging_steps=10,
         save_strategy="epoch",
         save_only_model=True,

@@ -209,7 +209,9 @@ completion is the rest of the full conversation's rendering (the teacher's JSON 
 end-of-turn token). Prompt and completion are tokenised separately, as at serving time, and the
 loss is on the completion. A checkpoint is saved per epoch; each is scored on the validation set
 by greedy, unconstrained generation (argmax agreement for `update`, score MAE for `judge`; ties
-go to the earlier epoch), and the best adapter is kept.
+go to the earlier epoch), and the best adapter is kept. Versions (`train` extra): transformers 5.20.2, peft 0.21.2,
+accelerate 1.15.0, safetensors 0.8.0, the set the CI training test runs; torch is pinned once the
+cluster's CUDA build is chosen.
 
 | Setting | Value |
 |---|---|
