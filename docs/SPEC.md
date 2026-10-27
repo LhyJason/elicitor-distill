@@ -401,6 +401,31 @@ new), `distill m3-file` with the rounded rho, `elicitor run` with a copy of `m5_
 unconstrained pass (reported on validation, §7.1). Then `compare`, `judge-eval`, and `bench` on
 GPU 0 alone, one model at a time.
 
+*M3 verdicts (10-27).* Job 64845112; the tables are in `results_summary/m3/`. Test sets:
+`update_test` 4,086 samples, `judge_test` 256. Differences are model − teacher on the `eig` arm at
+K = 5, with the 95 % CI and the one-sided lower bound.
+
+| | Found | Numbers |
+|---|---|---|
+| D1 | **does not hold** as frozen (one part of two) | agreement 0.956, not < 0.90; mass on truth −0.124 [−0.135, −0.113], below −0.02 |
+| D2 | **holds** | mass on truth +0.0061 (lower −0.0005); MAP accuracy −0.0005 (lower −0.0037) |
+| D3 | **holds**, far from the margin | mass on truth +0.0095 (lower +0.0054, Holm p 0.0096: above the teacher); MAP accuracy −0.0028 (lower −0.0069) |
+| D4 | **holds** | SFT 0.976 < 0.980 < 0.987; 1.7B–4B gap 0.007 against ½ × 0.035 for zero-shot |
+| D5 | **does not hold**, narrowly | Spearman with utility 0.832 [0.790, 0.868]; lower bound 0.790 < 0.80 (teacher 0.871 [0.827, 0.906], zero-shot 4B 0.758) |
+| D6 | **holds** (9.8 ×, inside the predicted 8–15 ×) | SFT 1.7B 8.61 requests/s against qwen3:32b 0.875; p50 1.73 s against 16.5 s; 3,977 against 23,611 MiB |
+
+Against the predictions: D1 and D5 missed, and D3 was not close to the margin. D1's fallback
+("this role never needed a 32B model") does not apply: the end-to-end half holds at six times the
+margin. Zero-shot 4B ranks the right value first about as often as the teacher (MAP accuracy
+−0.001) but spreads its scores (test KL 0.246 against 0.056 for SFT 4B), so the posterior
+concentrates more slowly. Argmax agreement does not see that, and KL is the quantity that enters
+Bayes' rule (§7.1). Every SFT student, the 0.6B included (−0.0017, lower −0.0065), is non-inferior
+on both metrics; every zero-shot base loses 0.10–0.23 mass on truth at K = 5. The `eig` arm asked
+the teacher's exact question sequence in every episode for every model but zero-shot 0.6B, whose
+measured ρ (0.37 / 0.51 / 0.52) is far from the others (`calibration.md`). Outside that
+model's `eig` arm the questions are the teacher's, so the gaps come from the updates alone. The SFT judge has 0.905 Spearman with the teacher's
+scores and is 0.04 below the teacher on utility; the bar it misses is the frozen 0.80 lower bound.
+
 ## 8. Repo layout and tooling
 
 ```text
@@ -455,7 +480,7 @@ until 10-26 and was then removed.
 | M0 | repo, pyproject with the Elicitor pin, CI, domain copy with checksums, `make-personas`, split guard, this spec | CI green; `personas_train.jsonl` frozen; the guard has a test. **Done 10-25:** 13 tests; 160 personas, seed 20261025, no redraw |
 | M1 | `collect`, `judge-collect`, `build-sft` (runnable on the mock provider), cluster scripts; the collection job | mock collection in CI; the job finishes within 6 h with 0 failed calls and parse failures < 1 % per role; `data/sft/*.jsonl.gz` frozen with line counts and hashes recorded here. **Code 10-25:** the four commands, the cluster scripts and the collection files; 26 tests, the mock chain in CI. **Smoke 10-25** (8 personas, 2 / 2 GPUs, 38 min): health OK, 0 failed calls, 0 parse failures in every role; 160 backstories (166 calls, 510 s) frozen in `data/backstories.jsonl` (SHA-256 `ddc1c8a3…92fa4e2`); seconds per attempt: update 3.7, simulate 54.3, judge 45.6. Full job: one answer seed, 1 / 3 GPUs (Q7). **Done 10-26** (4 h 21 min): health OK in both steps, 0 failed calls, 0 parse failures, 0 transport errors; 7,740 `update` (1,680 cache hits) and 7,740 `simulate` in 2 h 52 min, 4,300 `judge` in 1 h 29 min; seconds per attempt update 10.6, simulate 34.3, judge 39.5; leaking answers 11 % (train) and 9 % (dev). SFT sets frozen (`data/sft/MANIFEST.json` has the full hashes): `update_train` 5,704 rows from 7,200 records (1,496 duplicate prompts, mostly short answers that several personas gave alike), SHA-256 `9951b9abe9a9…`; `update_val` 516 from 540, `760d47af2f57…`; `judge_train` 4,000, `0f5fe1891629…`; `judge_val` 300, `233df3710610…`. Judge bins (train): 784 / 989 / 984 / 854 / 389 |
 | M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU; run where the `train` extra is installed, not in CI). **Done 10-26:** seven models created (three `update` students, the judge student, three zero-shot bases), each answering its 20 smoke samples with 0 parse failures and passing `check-template`; the validation table is in §7.1; SFT 4B agreement 0.974 against zero-shot 4B 0.923. Training on one A40 (best epoch by validation agreement, or judge MAE): 0.6B 1,339 s (3 epochs, best 2), 1.7B 1,549 s (3, best 2), 4B 2,116 s (2, best 2; about 100 s of selection per epoch), judge 1.7B 2,207 s (5, best 4). Found on the way: llama.cpp's conversion needs sentencepiece (§5); Ollama 0.24 logs prompts only at trace level (§6); the 70B judge ceiling needs 4 parallel slots on one A40 (§9) |
-| M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found. **Frozen 10-26** (§7.4). **Code 10-26:** `build-test` (the test sets from `m5_full` and `m7_judge`, behind `--allow-eval`; `eval-offline` and `bench` refuse a test file without it), `m3-file` (one model's file from a template, with its measured rho), `compare`, `judge-eval`; the templates `experiments/m3_calibrate.toml` (m5_smoke's file) and `m3_e2e.toml` (m5_full's, cut to the two arms); `cluster/e2e.sbatch`; 46 tests (6 new: the chain on Elicitor's mock provider, and the one-sided bound on known data). Code size 2,028 lines without blank, comment and docstring lines (2,709 physical) |
+| M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found. **Frozen 10-26** (§7.4). **Code 10-26:** `build-test` (the test sets from `m5_full` and `m7_judge`, behind `--allow-eval`; `eval-offline` and `bench` refuse a test file without it), `m3-file` (one model's file from a template, with its measured rho), `compare`, `judge-eval`; the templates `experiments/m3_calibrate.toml` (m5_smoke's file) and `m3_e2e.toml` (m5_full's, cut to the two arms); `cluster/e2e.sbatch`; 46 tests (6 new: the chain on Elicitor's mock provider, and the one-sided bound on known data). Code size 2,028 lines without blank, comment and docstring lines (2,709 physical). **Done 10-27** (job 64845112, 2 h 28 min on 4 A40s): all six runs 10/10 cells (1,440 episodes each), health OK, 0 failed calls and 0 parse failures in every role; per run 7,680 `update` calls (1,379 new; 2,421 for zero-shot 0.6B) and 7,680 `simulate` (all from `m5_full`'s cache, but 665 for zero-shot 0.6B); test sets `update_test` 4,086 samples and `judge_test` 256, read once; `results_summary/m3/` and `experiments/m3/` committed. D2, D3, D4, D6 hold; D1 (agreement 0.956) and D5 (lower bound 0.790) do not (§7.4). Two submissions failed first: exclusive-process GPUs (46 s; one model at a time on GPU 0) and `--gpus=4` split 3 + 1 across two nodes (83 s; `--nodes=1`) |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean |
 | M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student | one job of at most 2 h, hypotheses written here first |
 
