@@ -1,0 +1,27 @@
+# M5 teacher data for `imagine` (SPEC §7.5, Q15): every (candidate question, value) pair, 465 in
+# all, answered by the teacher qwen3:32b 8 times for the train set and 2 times for validation,
+# each at a seed of its own (none of m5_full's). No persona is read: the prompt has none. One job
+# of at most 1 h on 2 GPUs, the agent model only. Submit from the repo root:
+#   cluster/submit.sh cluster/imagine.sbatch
+
+name = "imagine"
+domain = "travel"
+data_dir = "../data"
+seed = 20261027
+
+[imagine]
+train_samples = 8
+val_samples = 2
+
+# Identical to the [llm] table of Elicitor's m5_full.toml at the pinned commit, so the teacher
+# answers exactly as in the full run.
+[llm]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"  # replaced by ELICITOR_SERVERS_AGENT / _USER in the job
+num_ctx = 2048
+think = { agent = false }  # qwen3 thinks unless told not to; llama3.3 has no thinking mode
+timeout = 600
+
+[llm.models]
+agent = "qwen3:32b"
+user = "llama3.3:latest"  # the 70B Q4_K_M (42.5 GB); the shared model folder has no :70b tag

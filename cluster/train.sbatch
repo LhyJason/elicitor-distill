@@ -40,6 +40,8 @@ PY
     fi
     adapter=(--adapter "models/$name/adapter")
     roles=("$role")
+    # An agent student (M5, SPEC §7.5) also answers `imagine`: its smoke and template check too.
+    if grep -q imagine_train "$1"; then imagine=1; fi
 else
     base=$1
     name="$(echo "$base" | tr '[:upper:]' '[:lower:]')-zs"  # e.g. qwen3-1.7b-zs
@@ -72,6 +74,16 @@ for role in "${roles[@]}"; do
     distill check-template --log "logs/prompts-$job-$role.log" --role "$role" --limit 20 \
         || status=1
 done
+if [[ -n "${imagine:-}" ]]; then
+    # One worker: the 20 imagine prompts are logged first and in order, then the 20 reads.
+    before=$(wc -l < "logs/ollama-$job-trace.log")
+    distill imagine-eval --imaginer "$model" --reader "$model" --base-url "$SERVER_URL" \
+        --limit 20 --workers 1 --strict || status=1
+    tail -n +"$((before + 1))" "logs/ollama-$job-trace.log" \
+        | grep -aE 'msg="(chat|completion) request"' > "logs/prompts-$job-imagine.log" || true
+    distill check-template --log "logs/prompts-$job-imagine.log" \
+        --data data/sft/imagine_val.jsonl.gz --limit 20 || status=1
+fi
 stop_server
 serve "logs/ollama-$job.log" 0
 

@@ -55,8 +55,8 @@ class TrainConfig:
     name: str  # also the folder under models/ and, prefixed with "elicitor-", the Ollama model
     role: str
     base: str  # Hugging Face id, e.g. "Qwen/Qwen3-1.7B"
-    train: Path
-    val: Path
+    train: tuple[Path, ...]  # one file, or several concatenated (the M5 agent student)
+    val: Path  # the selection metric is the role's
     max_length: int = 1024
     epochs: int = 3
     learning_rate: float = 2e-4
@@ -92,8 +92,9 @@ def load_train_config(path: str | Path) -> TrainConfig:
         raise ValueError(f"{path}: unknown [lora] keys {sorted(unknown)}")
     if raw["role"] not in ROLES:
         raise ValueError(f"{path}: role must be one of {ROLES}")
-    for key in ("train", "val"):
-        raw[key] = (path.parent / raw[key]).resolve()
+    train = raw["train"] if isinstance(raw["train"], list) else [raw["train"]]
+    raw["train"] = tuple((path.parent / t).resolve() for t in train)
+    raw["val"] = (path.parent / raw["val"]).resolve()
     for key in ("r", "alpha", "dropout"):
         if key in lora:
             raw[f"lora_{key}"] = lora[key]
@@ -231,7 +232,8 @@ def train(
     base = config.base_path(base_dir)
     tokenizer = AutoTokenizer.from_pretrained(base)
     tokenizer.padding_side = "right"
-    train_samples, val_samples = read_sft(config.train), read_sft(config.val)
+    train_samples = [s for p in config.train for s in read_sft(p)]
+    val_samples = read_sft(config.val)
     features, counts = encode_all(tokenizer, train_samples, config.max_length)
     progress(f"train: {counts}")
 

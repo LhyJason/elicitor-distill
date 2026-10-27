@@ -193,9 +193,10 @@ def test_check_prompts_reads_the_debug_log(update_val):
 def test_training_configs():
     configs = {p.name: load_train_config(p) for p in (ROOT / "configs").glob("*.toml")}
     assert set(configs) == {"update_0.6b.toml", "update_1.7b.toml", "update_4b.toml",
-                            "judge_1.7b.toml"}  # fmt: skip
-    for c in configs.values():
-        assert c.train.exists() and c.val.exists()
+                            "judge_1.7b.toml", "agent_1.7b.toml"}  # fmt: skip
+    frozen = json.loads((ROOT / "data" / "sft" / "MANIFEST.json").read_text(encoding="utf-8"))
+    for c in configs.values():  # every training file that is frozen (M5's once collected)
+        assert all(t.exists() for t in c.train if t.name in frozen["files"]) and c.val.exists()
         assert c.per_device_batch * c.grad_accum == 32
         assert c.lora_r == 16 and c.max_length == 1024
     assert configs["update_4b.toml"].learning_rate == 1e-4

@@ -9,7 +9,8 @@ Also: per-turn curves with the teacher overlaid, and how often a student's episo
 teacher's questions in the teacher's order.
 
 Outputs: `comparisons.csv`, `curves.csv`, `questions.csv`, `results.md` and one figure per
-curve metric (the `eig` arm at the largest budget).
+curve metric (the first non-inferiority arm at the runs' largest budget). M5 compares other
+arms (`eig_mc`, §7.5) at K = 5 only, a subset of the teacher's budgets.
 """
 
 from __future__ import annotations
@@ -136,14 +137,17 @@ def _csv(rows: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def markdown(rows: list[dict], questions: list[dict]) -> str:
-    lines = [f"### Non-inferiority (Q12): `{NI_ARM}` at K = {NI_BUDGET}", "",
+def markdown(rows: list[dict], questions: list[dict], ni_arms: tuple[str, ...] = (NI_ARM,)
+             ) -> str:  # fmt: skip
+    arms = ", ".join(f"`{a}`" for a in ni_arms)
+    lines = [f"### Non-inferiority (Q12): {arms} at K = {NI_BUDGET}", "",
              "| model | metric | model − teacher | 95 % CI | one-sided lower | margin | verdict |",
              "|---|---|---:|---|---:|---:|---|"]  # fmt: skip
     for r in rows:
-        if r["arm"] == NI_ARM and r["budget"] == NI_BUDGET and r["margin"] is not None:
+        if r["arm"] in ni_arms and r["budget"] == NI_BUDGET and r["margin"] is not None:
             verdict = "non-inferior" if r["non_inferior"] else "not shown"
-            lines.append(f"| {r['model']} | {r['metric']} | {r['diff']:+.4f} | "
+            model = r["model"] if len(ni_arms) == 1 else f"{r['model']} ({r['arm']})"
+            lines.append(f"| {model} | {r['metric']} | {r['diff']:+.4f} | "
                          f"[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] | {r['lower_95']:+.4f} | "
                          f"{r['margin']} | {verdict} |")  # fmt: skip
     lines += ["", "### Every comparison (Holm per metric over model × arm × budget)", "",
@@ -161,7 +165,7 @@ def markdown(rows: list[dict], questions: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def plot(curves: list[dict], metric: str, budget: int, path: Path) -> None:
+def plot(curves: list[dict], metric: str, budget: int, path: Path, arm: str = NI_ARM) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -170,11 +174,11 @@ def plot(curves: list[dict], metric: str, budget: int, path: Path) -> None:
     fig, ax = plt.subplots(figsize=(6.4, 4.0), dpi=150)
     for model in dict.fromkeys(r["model"] for r in curves):
         pts = [r for r in curves if (r["model"], r["metric"], r["arm"], r["budget"])
-               == (model, metric, NI_ARM, budget)]  # fmt: skip
+               == (model, metric, arm, budget)]  # fmt: skip
         style = {"color": "black", "linewidth": 2.5} if model == TEACHER else {"linewidth": 1.5}
         ax.plot([r["turn"] for r in pts], [r["mean"] for r in pts], marker="o", markersize=3,
                 label=model, **style)  # fmt: skip
-    ax.set(xlabel="turn", ylabel=metric, title=f"{NI_ARM}, K = {budget}")
+    ax.set(xlabel="turn", ylabel=metric, title=f"{arm}, K = {budget}")
     ax.legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(path)
@@ -183,16 +187,19 @@ def plot(curves: list[dict], metric: str, budget: int, path: Path) -> None:
 
 def compare(
     teacher_dir: str | Path, run_dirs: list[str | Path], out_dir: str | Path,
-    resamples: int = BOOTSTRAP_RESAMPLES,
+    resamples: int = BOOTSTRAP_RESAMPLES, arms: tuple[str, ...] = ARMS,
+    ni_arms: tuple[str, ...] = (NI_ARM,),
 ) -> dict[str, Any]:  # fmt: skip
-    state, teacher = read_run(teacher_dir)
+    state, teacher = read_run(teacher_dir, arms)
     runs: dict[str, list[dict]] = {}
+    budgets = set()
     for d in run_dirs:
-        s, episodes = read_run(d)
-        if (s["seed"], s["budgets"], s["personas"]) != (state["seed"], state["budgets"],
-                                                       state["personas"]):  # fmt: skip
+        s, episodes = read_run(d, arms)
+        same = (s["seed"], s["personas"]) == (state["seed"], state["personas"])
+        if not same or not set(s["budgets"]) <= set(state["budgets"]):
             raise ValueError(f"{d} does not pair with {teacher_dir}: seed, budgets or personas")
         runs[agent_model(s)] = episodes
+        budgets |= set(s["budgets"])
     rows = comparison_rows(teacher, runs, resamples)
     curves = curve_rows({TEACHER: teacher, **runs})
     questions = question_rows(teacher, runs)
@@ -200,7 +207,7 @@ def compare(
     out.mkdir(parents=True, exist_ok=True)
     for name, table in (("comparisons", rows), ("curves", curves), ("questions", questions)):
         write_text_atomic(out / f"{name}.csv", _csv(table))
-    write_text_atomic(out / "results.md", markdown(rows, questions))
+    write_text_atomic(out / "results.md", markdown(rows, questions, ni_arms))
     for metric in CURVE_METRICS:
-        plot(curves, metric, max(state["budgets"]), out / f"curve_{metric}.png")
+        plot(curves, metric, max(budgets), out / f"curve_{metric}.png", ni_arms[0])
     return {"rows": rows, "questions": questions, "models": list(runs)}

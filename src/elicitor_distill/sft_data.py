@@ -5,12 +5,13 @@ assistant message holding the teacher's reply re-serialised through the role's p
 (compact JSON, keys in schema order), so the student learns one canonical format. Records whose
 teacher call failed, and answers the simulator left empty (which the updater never reads), are
 dropped; a prompt that occurs twice in a split (the same answer drawn by both answer seeds) is
-kept once, since the teacher's reply to it is the same cached reply. Training personas become the
-`train` set, Elicitor's dev personas the `val` set.
+kept once, since the teacher's reply to it is the same cached reply. Not for `imagine` (M5): its
+samples of one prompt are draws at temperature 0.8, and all of them are kept. Training personas
+(and the `imagine` train samples) become the `train` set, Elicitor's dev personas the `val` set.
 
 The files are gzipped JSONL written byte for byte reproducibly (no timestamp or file name in the
 gzip header). `MANIFEST.json` records rows, drops and the SHA-256 of every file, compressed and
-uncompressed.
+uncompressed; building some roles keeps the other roles' entries.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from elicitor.jsonl import dumps_jsonl, read_jsonl
-from elicitor.llm.roles import JudgeReply, update_model
+from elicitor.llm.roles import JudgeReply, SimulateReply, update_model
 from elicitor.personas import DEV
 from elicitor.schema import Schema
 
@@ -34,7 +35,8 @@ from elicitor_distill.splits import TRAIN
 
 SFT_DIR = "data/sft"
 MANIFEST = "MANIFEST.json"
-ROLES = ("update", "judge")
+ROLES = ("update", "judge")  # the M1 sets; `imagine` (M5) is built on its own
+SFT_ROLES = (*ROLES, "imagine")
 SETS = {TRAIN: "train", DEV: "val"}  # persona split -> SFT set
 
 
@@ -68,9 +70,18 @@ def judge_meta(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def imagine_reply(row: dict[str, Any], schema: Schema) -> str:
+    return SimulateReply(answer=row["answer"]).model_dump_json()
+
+
+def imagine_meta(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: row[k] for k in ("slot", "qi", "kind", "value", "sample", "seed")}
+
+
 _BUILDERS: dict[str, tuple[Callable[..., str], Callable[[dict[str, Any]], dict[str, Any]]]] = {
     "update": (update_reply, update_meta),
     "judge": (judge_reply, judge_meta),
+    "imagine": (imagine_reply, imagine_meta),
 }
 
 
@@ -87,7 +98,7 @@ def sft_samples(
             continue
         prompt = row["messages"]
         key = json.dumps(prompt, ensure_ascii=False)
-        if key in seen:
+        if key in seen and role != "imagine":
             dropped["duplicate"] += 1
             continue
         seen.add(key)
@@ -120,8 +131,12 @@ def build_sft(
     if missing:
         raise FileNotFoundError(f"raw records missing: {', '.join(missing)}")
     out.mkdir(parents=True, exist_ok=True)
-    files: dict[str, Any] = {}
-    teachers: dict[str, list[str]] = {}
+    old = {"teachers": {}, "files": {}}
+    if (out / MANIFEST).exists():  # the other roles' entries stay
+        old = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
+    files: dict[str, Any] = {k: v for k, v in old["files"].items()
+                             if k.split("_")[0] not in roles}  # fmt: skip
+    teachers: dict[str, list[str]] = {k: v for k, v in old["teachers"].items() if k not in roles}
     for (role, split), path in paths.items():
         rows = read_jsonl(path)
         samples, dropped = sft_samples(role, rows, schema)
@@ -132,7 +147,7 @@ def build_sft(
         files[name] = {
             "rows": len(samples),
             "records": len(rows),
-            "personas": len({s["meta"]["persona"] for s in samples}),
+            "personas": len({s["meta"].get("persona") for s in samples} - {None}),
             "dropped": dropped,
             "sha256": hashlib.sha256(packed).hexdigest(),
             "sha256_jsonl": hashlib.sha256(text).hexdigest(),

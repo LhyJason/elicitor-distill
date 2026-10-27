@@ -1,0 +1,19 @@
+# SPEC §7.5 (M5, Decision Q15): one LoRA adapter on Qwen3-1.7B for both agent roles, `update`
+# and `imagine`, since Elicitor sends every agent role to one model. upd-1.7b-sft's settings; the
+# epoch is picked by `update` validation agreement, as there. One job of at most 1 h on one GPU:
+#   cluster/submit.sh cluster/train.sbatch configs/agent_1.7b.toml
+# Every setting not listed here is SPEC §5's default (LoRA r 16, alpha 32, dropout 0.05 on
+# q/k/v/o/gate/up/down; sequence length 1,024; cosine schedule, 3 % warm-up; seed 0).
+
+name = "agent-1.7b-sft"
+role = "update"
+base = "Qwen/Qwen3-1.7B"
+train = ["../data/sft/update_train.jsonl.gz", "../data/sft/imagine_train.jsonl.gz"]
+val = "../data/sft/update_val.jsonl.gz"
+epochs = 3
+learning_rate = 0.0002
+per_device_batch = 8
+grad_accum = 4  # effective batch 32
+max_new_tokens = 300  # the update role's max_tokens
+gradient_checkpointing = false  # activations fit in 48 GB; SPEC §5
+eval_batch = 128  # validation generation per epoch; memory-bound, so wider is faster

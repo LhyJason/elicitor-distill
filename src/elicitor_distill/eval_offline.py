@@ -100,10 +100,11 @@ def make_eval_client(
     max_attempts: int = 3,
     timeout: float = 600.0,
     think: bool | None = False,
+    roles: dict[str, Role] | None = None,
 ) -> LLMClient:
     """A client for one served model, with Elicitor's `[llm]` settings (`think` off, `num_ctx`
     2048) unless told otherwise; `think=None` sends no `think` field (models without a thinking
-    mode, like the judge teacher)."""
+    mode, like the judge teacher). The roles are the pass-through ones unless given."""
     server: Provider
     if provider == "mock":
         server = make_provider("mock")
@@ -113,7 +114,7 @@ def make_eval_client(
     else:
         raise ValueError(f"unknown provider {provider!r}")
     return LLMClient(
-        roles=passthrough_roles(prompts_dir),
+        roles=roles or passthrough_roles(prompts_dir),
         provider=server,
         models={"agent": model, "user": model},
         cache=None if cache is None else ReplyCache(cache),

@@ -13,9 +13,11 @@ from typing import Any
 from elicitor_distill import __version__
 from elicitor_distill.bench import BENCH_N, BENCH_WORKERS
 from elicitor_distill.collect import RAW_DIR
+from elicitor_distill.compare import ARMS as COMPARE_ARMS
 from elicitor_distill.data import DOMAIN, verify_domain_data
 from elicitor_distill.eval_offline import ROLES as EVAL_ROLES
 from elicitor_distill.export import MODELS_DIR, OUTTYPE
+from elicitor_distill.imagine import TEACHER
 from elicitor_distill.m3 import TEST_DIR
 from elicitor_distill.personas import (
     N_TRAIN,
@@ -23,7 +25,7 @@ from elicitor_distill.personas import (
     check_train_personas,
     write_train_personas,
 )
-from elicitor_distill.sft_data import ROLES, SFT_DIR
+from elicitor_distill.sft_data import ROLES, SFT_DIR, SFT_ROLES
 from elicitor_distill.splits import EVAL, EvalSplitError
 
 DEFAULT_URL = "http://127.0.0.1:11434"
@@ -97,6 +99,13 @@ def _judge_collect(args: argparse.Namespace) -> int:
     from elicitor_distill.judge_collect import judge_collect
 
     return _report(judge_collect(load_collect_config(args.config), args.out, args.workers, print))
+
+
+def _imagine_collect(args: argparse.Namespace) -> int:
+    from elicitor_distill.config import load_collect_config
+    from elicitor_distill.imagine import collect_imagine
+
+    return _report(collect_imagine(load_collect_config(args.config), args.out, args.workers, print))
 
 
 def _build_sft(args: argparse.Namespace) -> int:
@@ -249,10 +258,57 @@ def _m3_file(args: argparse.Namespace) -> int:
     return 0
 
 
+def _imagine_eval(args: argparse.Namespace) -> int:
+    from elicitor.experiments.health import format_roles
+    from elicitor.llm.roles import build_roles
+
+    from elicitor_distill.eval_offline import make_eval_client, strict_problems
+    from elicitor_distill.imagine import evaluate_imagine, write_imagine_report
+    from elicitor_distill.sft_data import read_sft
+
+    prompts = f"{args.data_dir}/{DOMAIN}/prompts"
+    samples = read_sft(args.data)[: args.limit] if args.limit else read_sft(args.data)
+
+    def client(model: str) -> Any:
+        return make_eval_client(prompts, model, args.provider, args.base_url, args.num_ctx,
+                                roles=build_roles(prompts))  # fmt: skip
+
+    imaginer = None if args.imaginer == TEACHER else client(args.imaginer)
+    reader = client(args.reader)
+    try:
+        result = evaluate_imagine(samples, _schema(args.data_dir), imaginer, reader,
+                                  args.workers, print)  # fmt: skip
+    finally:
+        reader.close()
+        if imaginer:
+            imaginer.close()
+    if args.out:
+        write_imagine_report(args.out, result, {"imaginer": args.imaginer, "reader": args.reader,
+                             "data": Path(args.data).name, "limit": args.limit})  # fmt: skip
+    for step, stats in result["llm"].items():
+        print(f"{step}:\n{format_roles(stats['roles'])}")
+    print(json.dumps(result["tables"]["overall"]))
+    strict = [p for s in result["llm"].values() for p in strict_problems(s)] if args.strict else []
+    problems = result["problems"] + strict
+    for problem in problems:
+        print(f"  - {problem}")
+    print("health: PROBLEMS" if problems else "health: OK")
+    return 1 if problems else 0
+
+
+def _m5_report(args: argparse.Namespace) -> int:
+    from elicitor_distill.m5 import m5_report
+
+    m5_report(args.teacher, args.r1, args.r2, args.imagine_student, args.imagine_teacher,
+              args.agent_test, args.update_test, args.out)  # fmt: skip
+    print(Path(args.out, "verdicts.md").read_text(encoding="utf-8").split("\n\n### Con")[0])
+    return 0
+
+
 def _compare(args: argparse.Namespace) -> int:
     from elicitor_distill.compare import compare
 
-    result = compare(args.teacher, args.runs, args.out)
+    result = compare(args.teacher, args.runs, args.out, arms=tuple(args.arms))
     print(Path(args.out, "results.md").read_text(encoding="utf-8").split("\n\n### Every")[0])
     return 0 if result["rows"] else 1
 
@@ -295,12 +351,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="overwrite an existing backstories file")
     collection("collect", "collect the update teacher's records", _collect, 32)
     collection("judge-collect", "collect the judge teacher's records", _judge_collect, 32)
+    collection("imagine-collect", "collect the imagine teacher's records (M5)", _imagine_collect,
+               32)  # fmt: skip
 
     p = sub.add_parser("build-sft", help="raw records to the gzipped SFT sets and their manifest")
     p.add_argument("--raw", default=RAW_DIR, help=f"raw records (default: {RAW_DIR})")
     p.add_argument("--out", default=SFT_DIR, help=f"output folder (default: {SFT_DIR})")
     p.add_argument("--data-dir", default="data", help="folder holding <domain>/ (default: data)")
-    p.add_argument("--roles", nargs="+", choices=ROLES, default=list(ROLES))
+    p.add_argument("--roles", nargs="+", choices=SFT_ROLES, default=list(ROLES))
     p.set_defaults(func=_build_sft)
 
     p = sub.add_parser("train", help="LoRA SFT of a student; picks the best epoch on val")
@@ -382,7 +440,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("runs", nargs="+", help="student run folders")
     p.add_argument("--teacher", required=True, help="Elicitor's m5_full run folder (read only)")
     p.add_argument("--out", required=True, help="table and figure folder")
+    p.add_argument("--arms", nargs="+", default=list(COMPARE_ARMS), help="arms compared")
     p.set_defaults(func=_compare)
+
+    p = sub.add_parser("imagine-eval", help="M5: imagined answers, read by a fixed reader")
+    p.add_argument("--imaginer", required=True, help=f"served model, or {TEACHER!r} (stored)")
+    p.add_argument("--reader", required=True, help="served model that reads the answers")
+    p.add_argument("--data", default=f"{SFT_DIR}/imagine_val.jsonl.gz", help="SFT file")
+    p.add_argument("--limit", type=int, help="only the first n samples")
+    p.add_argument("--provider", choices=("ollama", "mock"), default="ollama")
+    p.add_argument("--base-url", default=os.environ.get("ELICITOR_BASE_URL", DEFAULT_URL))
+    p.add_argument("--num-ctx", type=int, default=2048)
+    p.add_argument("--workers", type=int, default=8)
+    p.add_argument("--data-dir", default="data", help="folder holding <domain>/")
+    p.add_argument("--out", help="output folder")
+    p.add_argument("--strict", action="store_true", help="fail on any parse failure (smoke)")
+    p.set_defaults(func=_imagine_eval)
+
+    p = sub.add_parser("m5-report", help="M5: the E1-E5 verdicts (SPEC §7.5)")
+    p.add_argument("--teacher", required=True, help="Elicitor's m5_full run folder (read only)")
+    p.add_argument("--r1", required=True, help="the agent student's run folder")
+    p.add_argument("--r2", help="the update student's run folder (left out if unfinished)")
+    p.add_argument("--imagine-student", required=True, help="imagine-eval folder of R1's model")
+    p.add_argument("--imagine-teacher", required=True, help="imagine-eval folder of the teacher")
+    p.add_argument("--agent-test", required=True, help="update test summary.json, agent student")
+    p.add_argument("--update-test", required=True, help="update test summary.json, M3 student")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=_m5_report)
 
     p = sub.add_parser("judge-eval", help="D5: judge Spearman with utility on the test set")
     p.add_argument("folders", nargs="+", help="eval-offline folders of the judge test set")
