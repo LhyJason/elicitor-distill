@@ -510,6 +510,62 @@ reports, so a long run loses E3 and nothing else.
 dropped from the offline table; `imagine_train` goes to 4 samples per pair. No job is
 resubmitted past the budget.
 
+*M5 jobs (10-27).* The first collection job (64856349) stopped after 4 s: the agent group's
+model folder holds only the students, so Ollama answered 404 for qwen3:32b; `imagine.sbatch`
+now serves from the shared folder (874c257). Collection (64856819, 941 s on 2 A40s): 4,650
+`imagine` calls, 0 failed, 0 parse failures, 3.1 s per attempt, no empty answer, so nothing was
+dropped; `imagine_train` 3,720 rows (SHA-256 `c16d9bb55074…`), `imagine_val` 930
+(`56e4c39a4a34…`), the four M1 sets unchanged; leaking answers 6.8 % (train), 7.8 % (val).
+Training (64856820, 2,557 s on one A40): 9,424 rows (5,704 `update` + 3,720 `imagine`), 2,284 s,
+best epoch 3 of 3 (validation agreement 0.960 / 0.953 / 0.968 by epoch); after export 0.9717
+`update` validation agreement (KL 0.060), and 20 + 20 smoke samples per role with 0 parse
+failures and the template check passed. End to end (64856821, 2,238 s on 2 A40s): servers and R1 calibration
+119 s, R1 with the update test 1,011 s, the offline table 657 s, R2 561 s. In all M5 used about
+2.5 GPU-hours, so the project used about 37.5 of the 40 of §1.
+
+*M5 verdicts (10-27).* Job 64856821; the tables are in `results_summary/m5/`. Means at K = 5
+(mass on truth / MAP accuracy): teacher `eig` 0.5135 / 0.6556, teacher `eig_mc` 0.5406 / 0.6676;
+R1 `eig` 0.5098 / 0.6537, R1 `eig_mc` 0.5443 / 0.6704; R2 `eig` 0.5230 / 0.6528 (M3's episodes
+again, to the fourth decimal), R2 `eig_mc` 0.5498 / 0.6593.
+
+| | Found | Numbers |
+|---|---|---|
+| E1 | **holds** | mass on truth +0.0037 [+0.0002, +0.0072], lower +0.0008; MAP accuracy +0.0028, lower −0.0009 |
+| E2 | **holds**, above the predicted range | +0.0345 [+0.0264, +0.0427] (teacher +0.027); log loss −0.058; violations 1.23 → 0.33 per episode |
+| E3 | **does not hold** | R1 − R2 −0.0055 [−0.0144, +0.0026] |
+| E4 | **holds** | `update` test agreement 0.986 against the bar 0.975; R1 `eig` − teacher −0.0036, lower −0.0087 mass on truth, −0.0051 MAP accuracy |
+| E5 | **holds** | mass on the imagined value 0.686 against the teacher's 0.677: +0.0089, lower +0.0017 over 465 pairs |
+
+Offline table (930 `imagine_val` answers each, read by `upd-1.7b-sft`):
+
+| imaginer | mass on value | open | choice | yes/no | leaking | pairs differ | words |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| teacher | 0.677 | 0.733 | 0.681 | 0.654 | 7.9 % | 94.6 % | 16.9 |
+| `agent-1.7b-sft` | 0.686 | 0.747 | 0.692 | 0.655 | 7.4 % | 86.2 % | 16.2 |
+| `upd-1.7b-sft` | 0.573 | 0.716 | 0.573 | 0.531 | 7.4 % | 88.6 % | 12.6 |
+| zero-shot 1.7B | 0.509 | 0.698 | 0.508 | 0.456 | 11.8 % | 76.1 % | 11.7 |
+
+Against the predictions: E3 missed, and E2's gain is larger than the teacher's, not smaller.
+With both roles on one 1.7B model, `eig_mc` is non-inferior to the teacher's and gains as much
+over `eig`. The distilled imaginer writes answers as informative as the teacher's; the update
+student, never trained on `imagine`, writes shorter ones that carry less (0.573), yet in the loop
+its `eig_mc` does as well (R2 gains +0.027 over its own `eig`). `eig_mc` uses the imagined
+answers only to rank 5 shortlisted questions, and that ranking tolerates the weaker imaginer
+here. E3 is a statement about this domain and shortlist, not a claim that the imaginer never
+matters. Calls: R1 80,160 `update` (1,459 new, 2.0 s per attempt) and 77,760 `imagine` (585 new),
+0 failed calls and 0 parse failures; R2 476 new `update` and 587 new `imagine` with 1 parse
+failure (0.17 %); both runs health OK; every `simulate` call came from `m5_full`'s cache. R1's `eig_mc` asked the
+teacher's exact question sequence in 20 % of its 240 episodes, R2's in none (both `eig` arms in
+all), so the `eig_mc` gaps mix the questions and the updates; R2's `eig_mc` is also
+non-inferior to the teacher's (+0.0092, lower +0.0029). R1's
+ρ (dev personas): open 0.988, choice 0.973, yes/no 0.861 (`upd-1.7b-sft` 0.994 / 0.975 / 0.838).
+
+*Deviation (recorded 10-27).* In the offline table, `upd-1.7b-sft` as imaginer, a baseline row
+outside E1–E5, had 10 parse failures in 940 attempts (1.06 %, over `elicitor health`'s 1 % bar). Every
+retry succeeded (930 of 930 answered, 0 failed calls), but `imagine-eval` reported health
+PROBLEMS and the job's exit status was 1. The job was not rerun: no hypothesis reads that row,
+and the rerun would repeat it at temperature 0.8.
+
 ## 8. Repo layout and tooling
 
 ```text
@@ -568,7 +624,7 @@ until 10-26 and was then removed.
 | M2 | `train`, `export`, `eval-offline`, `bench`; three `update` students and three zero-shot baselines as Ollama models; the 1.7B judge student | six models answer 20 validation samples with 0 parse failures; the validation table; SFT 4B agreement above zero-shot 4B (else the format or template is debugged before M3). **Code 10-26:** the four commands plus `eval-table` and `check-template`; four training configs; `train.sbatch`, `teacher.sbatch`; the training chain tested on a tiny random model (CPU; run where the `train` extra is installed, not in CI). **Done 10-26:** seven models created (three `update` students, the judge student, three zero-shot bases), each answering its 20 smoke samples with 0 parse failures and passing `check-template`; the validation table is in §7.1; SFT 4B agreement 0.974 against zero-shot 4B 0.923. Training on one A40 (best epoch by validation agreement, or judge MAE): 0.6B 1,339 s (3 epochs, best 2), 1.7B 1,549 s (3, best 2), 4B 2,116 s (2, best 2; about 100 s of selection per epoch), judge 1.7B 2,207 s (5, best 4). Found on the way: llama.cpp's conversion needs sentencepiece (§5); Ollama 0.24 logs prompts only at trace level (§6); the 70B judge ceiling needs 4 parallel slots on one A40 (§9) |
 | M3 | D1–D6 frozen → `calibrate` × 6 → end-to-end runs × 6 → `compare` → `bench` → test-set offline table (the first read of eval data) → judge test | job within 4 h; every run complete (10 cells) and healthy; `results_summary/` committed; D1–D6 each marked as found. **Frozen 10-26** (§7.4). **Code 10-26:** `build-test` (the test sets from `m5_full` and `m7_judge`, behind `--allow-eval`; `eval-offline` and `bench` refuse a test file without it), `m3-file` (one model's file from a template, with its measured rho), `compare`, `judge-eval`; the templates `experiments/m3_calibrate.toml` (m5_smoke's file) and `m3_e2e.toml` (m5_full's, cut to the two arms); `cluster/e2e.sbatch`; 46 tests (6 new: the chain on Elicitor's mock provider, and the one-sided bound on known data). Code size 2,028 lines without blank, comment and docstring lines (2,709 physical). **Done 10-27** (job 64845112, 2 h 28 min on 4 A40s): all six runs 10/10 cells (1,440 episodes each), health OK, 0 failed calls and 0 parse failures in every role; per run 7,680 `update` calls (1,379 new; 2,421 for zero-shot 0.6B) and 7,680 `simulate` (all from `m5_full`'s cache, but 665 for zero-shot 0.6B); test sets `update_test` 4,086 samples and `judge_test` 256, read once; `results_summary/m3/` and `experiments/m3/` committed. D2, D3, D4, D6 hold; D1 (agreement 0.956) and D5 (lower bound 0.790) do not (§7.4). Two submissions failed first: exclusive-process GPUs (46 s; one model at a time on GPU 0) and `--gpus=4` split 3 + 1 across two nodes (83 s; `--nodes=1`) |
 | M4 | README with results, laptop demo transcript, fresh-clone test, repo made public | README numbers match `results_summary/`; hygiene check clean. **Done 10-27:** README with the results, the hypotheses and limitations; `experiments/demo_student.toml`; `docs/demo_transcript.md` (SFT 1.7B Q8_0 on an RTX 3060 Laptop GPU, 6 GB, Ollama 0.24.0 for Windows: about 3.9 GB, 1.2–2.0 s per update; validation agreement 0.973, MAE 0.355, KL 0.074 against the cluster's 0.972 / 0.361 / 0.075). Found on the way: Ollama 0.40.11 writes the keys of a nested object in alphabetical order under a JSON schema `format`, and the student drops to 0.936 agreement (KL 0.137) there; the README pins 0.24 (§9). The demo shows one student miss the teacher does not make ("warm" read as no preference). Fresh clone in a clean venv: the README's install and check commands pass. Repository public 10-27 |
-| M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student. *Chosen 10-27: `imagine`* (Q15, §7.5; E1–E5 frozen in Q16) | hypotheses written here first. **Code 10-27:** `imagine-collect`, `imagine-eval`, `m5-report`; `build-sft --roles imagine` (repeated prompts kept, the M1 manifest entries untouched); `train` reads several training files; `compare --arms` and a run with a subset of the teacher's budgets; `configs/agent_1.7b.toml`, `experiments/imagine.toml`, `experiments/m5_e2e.toml`; `cluster/imagine.sbatch`, `cluster/m5.sbatch`, and the imagine smoke and template check in `train.sbatch`; 55 tests (9 new, among them `eig_mc`'s cache entry and the report on mock runs). Code size 2,399 lines by the count of M3 (2,030 before). *Changed 10-27:* three short jobs instead of one of 2 h, since the teacher data must exist before the student is trained: collection (2 GPUs, at most 1 h), training (1 GPU, 1 h), end to end (2 GPUs, at most 1.5 h), within the 40 GPU-hours of §1; every call healthy as in M3; E1–E5 each marked as found |
+| M5 | optional, at most one: pairwise judge task; logit distillation; distilling `imagine` so `eig_mc` can run on a student. *Chosen 10-27: `imagine`* (Q15, §7.5; E1–E5 frozen in Q16) | hypotheses written here first. **Code 10-27:** `imagine-collect`, `imagine-eval`, `m5-report`; `build-sft --roles imagine` (repeated prompts kept, the M1 manifest entries untouched); `train` reads several training files; `compare --arms` and a run with a subset of the teacher's budgets; `configs/agent_1.7b.toml`, `experiments/imagine.toml`, `experiments/m5_e2e.toml`; `cluster/imagine.sbatch`, `cluster/m5.sbatch`, and the imagine smoke and template check in `train.sbatch`; 55 tests (9 new, among them `eig_mc`'s cache entry and the report on mock runs). Code size 2,399 lines by the count of M3 (2,030 before). *Changed 10-27:* three short jobs instead of one of 2 h, since the teacher data must exist before the student is trained: collection (2 GPUs, at most 1 h), training (1 GPU, 1 h), end to end (2 GPUs, at most 1.5 h), within the 40 GPU-hours of §1; every call healthy as in M3; E1–E5 each marked as found. **Done 10-27** (§7.5): collection 941 s (4,650 `imagine` calls, 0 failed, 0 parse failures; `imagine_train` 3,720 and `imagine_val` 930 rows, the M1 sets unchanged), training 2,557 s (best epoch 3), end to end 2,238 s; both end-to-end runs 10/10 cells (480 episodes each) and health OK. E1, E2, E4, E5 hold; E3 does not (R1 − R2 −0.0055 [−0.0144, +0.0026]). `results_summary/m5/`, `experiments/m5/` and the imagine SFT sets committed. One job stopped after 4 s first (the teacher's model folder, fixed in 874c257); one deviation: the `upd-1.7b-sft` imaginer row of the offline table at 1.06 % parse failures, so the last job exited 1 (§7.5) |
 
 ## 11. Hygiene and licenses
 

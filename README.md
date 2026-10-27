@@ -14,10 +14,12 @@ serves 9.8 × as many requests per second on one GPU in a sixth of the memory, a
 interactive demo on a laptop GPU with 6 GB. All three fine-tuned sizes are non-inferior; no
 zero-shot base is, although the zero-shot 4B ranks the right value first about as often as the
 teacher. The 1.7B judge student tracks the true utility at Spearman 0.832, 0.04 below its 70B
-teacher, and misses the pre-registered bar narrowly.
+teacher, and misses the pre-registered bar narrowly. A second 1.7B student that also imagines
+answers runs Elicitor's best selector, `eig_mc`, entirely on its own and is non-inferior to the
+32B teacher there too.
 
-Hypotheses, thresholds and predictions were frozen in [docs/SPEC.md](docs/SPEC.md) (§7.4) before
-any test data was read; every design decision is recorded there.
+Hypotheses, thresholds and predictions were frozen in [docs/SPEC.md](docs/SPEC.md) (§7.4, §7.5)
+before any test data was read; every design decision is recorded there.
 
 ## How it works
 
@@ -50,7 +52,7 @@ the teacher's question sequence in all 1,440 of its episodes.
 
 ## Results
 
-All numbers are from `results_summary/m3/` (one evaluation job, 2 h 28 min on 4 A40s, 1,440
+The numbers in this section up to the hypotheses are from `results_summary/m3/` (one evaluation job, 2 h 28 min on 4 A40s, 1,440
 episodes per model, no failed calls and no parse failures in any role).
 
 ### End to end: `eig` selector, 5 questions, 48 test personas × 5 replicates
@@ -118,6 +120,35 @@ produced one valid reply without schema-constrained decoding; the students did 9
 | D4 | After SFT, agreement rises with size and the 1.7B–4B gap halves | **holds**: 0.976 < 0.980 < 0.987; gap 0.007 against 0.035 zero-shot |
 | D5 | SFT 1.7B judge: Spearman with utility, 95 % lower bound ≥ 0.80 | **does not hold**, narrowly: 0.790 |
 | D6 | SFT 1.7B serves `update` at ≥ 5 × the teacher's rate | **holds**: 9.8 × |
+
+### The whole agent on one student: `eig_mc`
+
+Elicitor's best selector at 5 questions, `eig_mc`, ranks a shortlist of questions by imagining
+how users with each preference would answer and reading those answers with the updater. That
+`imagine` role was the one agent role no student had learned. `agent-1.7b-sft` is one LoRA
+adapter on Qwen3 1.7B trained on the `update` set plus 3,720 teacher `imagine` replies (8 per
+question–value pair, `data/sft/imagine_train.jsonl.gz`), so both roles run on one model. All
+numbers are from `results_summary/m5/` (one 37-minute job on 2 A40s, no failed calls).
+
+| `eig_mc` at K = 5 | mass on truth | MAP accuracy | gain over `eig` (mass on truth) |
+|---|---:|---:|---:|
+| teacher (qwen3 32B, both roles) | 0.5406 | 0.6676 | +0.027 [+0.019, +0.035] |
+| **`agent-1.7b-sft` (both roles)** | **0.5443** | **0.6704** | **+0.0345 [+0.0264, +0.0427]** |
+| `upd-1.7b-sft` (never trained to imagine) | 0.5498 | 0.6593 | +0.027 |
+
+| | Hypothesis (frozen before any M5 data) | Found |
+|---|---|---|
+| E1 | The student's `eig_mc` is non-inferior to the teacher's | **holds**: lower bounds +0.0008 mass on truth, −0.0009 MAP accuracy |
+| E2 | On the student, `eig_mc` beats `eig` | **holds**: +0.0345 [+0.0264, +0.0427] |
+| E3 | Distilling `imagine` matters: the agent student's `eig_mc` beats the update student's | **does not hold**: −0.0055 [−0.0144, +0.0026] |
+| E4 | No forgetting of `update` | **holds**: test agreement 0.986 (bar 0.975); `eig` non-inferior to the teacher's |
+| E5 | The student imagines as informatively as the teacher | **holds**: mass on the imagined value 0.686 against 0.677 |
+
+Offline, the distilled imaginer's answers carry as much as the teacher's, and the update student's
+untrained ones carry clearly less (0.573). In the loop that gap does not show: `eig_mc` uses the
+imagined answers only to rank 5 shortlisted questions, and the ranking tolerates the weaker
+imaginer here. One baseline row of the offline table (the update student imagining) had 1.06 %
+parse failures against a 1 % bar, every retry answered; it is recorded as a deviation in SPEC §7.5.
 
 ## Laptop demo
 
@@ -189,10 +220,17 @@ distill m3-file experiments/m3_e2e.toml --model elicitor-upd-1.7b-sft --name e2e
 elicitor run experiments/m3/e2e_upd-1.7b-sft.toml --out results/m3/upd-1.7b-sft/run
 distill compare results/m3/*/run --teacher <elicitor>/results/m5_full --out results/m3/compare
 distill judge-eval results/m3/judge-1.7b-sft/judge_test
+
+# M5, the agent student (cluster/imagine.sbatch, train.sbatch configs/agent_1.7b.toml, m5.sbatch)
+distill imagine-collect experiments/imagine.toml --out data/raw/imagine
+distill build-sft --raw data/raw/imagine --roles imagine
+distill train configs/agent_1.7b.toml --base-dir ~/hf
+distill imagine-eval --imaginer elicitor-agent-1.7b-sft --reader elicitor-upd-1.7b-sft     --out results/m5/imagine/agent-1.7b-sft
 ```
 
 `data/travel/` is a verbatim copy of Elicitor's domain files at the pinned commit, checked against
-`CHECKSUMS.sha256`. `experiments/m3/` holds the exact run files, each with the model's measured ρ.
+`CHECKSUMS.sha256`. `experiments/m3/` and `experiments/m5/` hold the exact run files, each with the
+model's measured ρ.
 
 ## Limitations
 
@@ -201,8 +239,9 @@ distill judge-eval results/m3/judge-1.7b-sft/judge_test
 - The students imitate the teacher, errors included; nothing here corrects the teacher against
   the truth. The 1.7B's small gain over the teacher is real in this test but is not an argument
   that distillation improves on the teacher in general.
-- Only the updater and the judge are distilled. The selector `eig_mc` also calls the agent model
-  to imagine answers, which no student learned, so it was left out.
+- `eig_mc` was tested at 5 questions only, with the shortlist and sample counts of Elicitor's run;
+  that an untrained imaginer did as well there (E3) need not hold for longer budgets or other
+  domains.
 - Throughput is one benchmark on one GPU type with one server setting (8 parallel slots); the
   teacher was measured under the same load, not tuned for it.
 - The judge student misses its frozen bar (lower bound 0.790 against 0.80).

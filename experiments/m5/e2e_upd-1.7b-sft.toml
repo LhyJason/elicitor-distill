@@ -1,0 +1,43 @@
+# Written by `distill m3-file` from m5_e2e.toml; model elicitor-upd-1.7b-sft.
+# M5 end-to-end template (SPEC §7.5, Q15): Elicitor's m5_full.toml at the pinned commit, cut to
+# the arms sel=eig_mc,upd=llm,phr=tpl and sel=eig,upd=llm,phr=tpl at K = 5 (5 replicates, the 48
+# eval personas, seed 8000, eig_mc's shortlist 5 and 3 samples), so every episode pairs with the
+# teacher's by common random numbers. `distill m3-file` replaces the name, the agent model, the
+# data folder and both selectors' rho (the model's own, from its calibration). The job copies a
+# reply cache into the run folder first. The rho below is the teacher's, so this file as it
+# stands reruns the teacher's two arms at K = 5.
+
+name = "m5_upd-1.7b-sft"
+domain = "travel"
+data_dir = "../../data"
+split = "eval"
+seed = 8000
+replicates = 5
+budgets = [5]
+tau = 0.9
+selectors = ["eig"]
+updaters = ["llm"]
+phrasers = ["tpl"]
+extra_arms = ["sel=eig_mc,upd=llm,phr=tpl"]
+
+[simulator]
+kind = "llm"
+
+[selector.eig]
+rho = { open = 0.99, choice = 0.97, yesno = 0.84 }
+
+[selector.eig_mc]
+rho = { open = 0.99, choice = 0.97, yesno = 0.84 }
+shortlist = 5
+samples = 3
+
+[llm]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"  # replaced by ELICITOR_SERVERS_AGENT / _USER in the job
+num_ctx = 2048
+think = { agent = false }  # qwen3 thinks unless told not to; llama3.3 has no thinking mode
+timeout = 600
+
+[llm.models]
+agent = "elicitor-upd-1.7b-sft"
+user = "llama3.3:latest"  # the 70B Q4_K_M (42.5 GB); the shared model folder has no :70b tag

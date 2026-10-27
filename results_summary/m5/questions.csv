@@ -1,0 +1,5 @@
+model,arm,budget,episodes,same_questions
+elicitor-agent-1.7b-sft,"sel=eig,upd=llm,phr=tpl",5,240,1
+elicitor-agent-1.7b-sft,"sel=eig_mc,upd=llm,phr=tpl",5,240,0.2
+elicitor-upd-1.7b-sft,"sel=eig,upd=llm,phr=tpl",5,240,1
+elicitor-upd-1.7b-sft,"sel=eig_mc,upd=llm,phr=tpl",5,240,0

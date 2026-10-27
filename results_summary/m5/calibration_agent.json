@@ -1,0 +1,96 @@
+{
+  "name": "calibrate_agent-1.7b-sft",
+  "simulator": "llm",
+  "models": {
+    "agent": "elicitor-agent-1.7b-sft",
+    "user": "llama3.3:latest"
+  },
+  "personas": 12,
+  "answers": 540,
+  "leak_rate": 0.0815,
+  "rho": {
+    "rule": {
+      "open": {
+        "answers": 108,
+        "correct_rate": 0.8403,
+        "chance": 0.2333,
+        "rho": 0.7917,
+        "ci_low": 0.7271,
+        "ci_high": 0.8587
+      },
+      "choice": {
+        "answers": 216,
+        "correct_rate": 0.8777,
+        "chance": 0.2917,
+        "rho": 0.8273,
+        "ci_low": 0.7478,
+        "ci_high": 0.8987
+      },
+      "yesno": {
+        "answers": 216,
+        "correct_rate": 0.8218,
+        "chance": 0.5,
+        "rho": 0.6435,
+        "ci_low": 0.4815,
+        "ci_high": 0.7778
+      }
+    },
+    "llm": {
+      "open": {
+        "answers": 108,
+        "correct_rate": 0.9907,
+        "chance": 0.2333,
+        "rho": 0.9879,
+        "ci_low": 0.9698,
+        "ci_high": 1.0
+      },
+      "choice": {
+        "answers": 216,
+        "correct_rate": 0.9807,
+        "chance": 0.2917,
+        "rho": 0.9728,
+        "ci_low": 0.9434,
+        "ci_high": 0.9956
+      },
+      "yesno": {
+        "answers": 216,
+        "correct_rate": 0.9306,
+        "chance": 0.5,
+        "rho": 0.8611,
+        "ci_low": 0.7685,
+        "ci_high": 0.9444
+      }
+    }
+  },
+  "llm": {
+    "provider": "ollama",
+    "models": {
+      "agent": "elicitor-agent-1.7b-sft",
+      "user": "llama3.3:latest"
+    },
+    "roles": {
+      "update": {
+        "calls": 540,
+        "cache_hits": 17,
+        "attempts": 523,
+        "parse_failures": 0,
+        "failed_calls": 0,
+        "transport_errors": 0,
+        "latency_s": 526.757,
+        "prompt_tokens": 155693,
+        "completion_tokens": 23160
+      },
+      "simulate": {
+        "calls": 540,
+        "cache_hits": 540,
+        "attempts": 0,
+        "parse_failures": 0,
+        "failed_calls": 0,
+        "transport_errors": 0,
+        "latency_s": 0.0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0
+      }
+    }
+  }
+}

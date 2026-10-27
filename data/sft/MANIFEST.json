@@ -5,6 +5,9 @@
     ],
     "judge": [
       "llama3.3:latest"
+    ],
+    "imagine": [
+      "qwen3:32b"
     ]
   },
   "files": {
@@ -55,6 +58,30 @@
       },
       "sha256": "233df37106108ab0d8181cd669d088ce8e5976d82cf4a403e537e22c521af0bf",
       "sha256_jsonl": "d2b42844351da59cb73871ac80c3da2fc842e27bcf6c0a67eb681278b88d9d19"
+    },
+    "imagine_train.jsonl.gz": {
+      "rows": 3720,
+      "records": 3720,
+      "personas": 0,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 0
+      },
+      "sha256": "c16d9bb55074e9aa09fef80195adf5264cd2ee5c1a3b80069d1f6c7d905a506b",
+      "sha256_jsonl": "ec60b9606fc26ef1eda4b1fc55d5032e5249f9e87399d4adf123995819f0375d"
+    },
+    "imagine_val.jsonl.gz": {
+      "rows": 930,
+      "records": 930,
+      "personas": 0,
+      "dropped": {
+        "failed": 0,
+        "empty_answer": 0,
+        "duplicate": 0
+      },
+      "sha256": "56e4c39a4a34c529c4e13dbf8751cf0226b5fee31684dce61ae986998ac8cfbe",
+      "sha256_jsonl": "3ad3dde97a9499bd1bb79f55faf1fbb3732814c42591d19eb19399ab20e0e089"
     }
   }
 }

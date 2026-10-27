@@ -90,7 +90,8 @@ def test_mock_collection_keeps_repeated_prompts_and_the_frozen_manifest(imagine_
     assert result["problems"] == [] and result["splits"]["train"]["ok"] == 930
     frozen = json.loads((data_dir / "sft" / MANIFEST).read_text(encoding="utf-8"))
     for name, entry in frozen["files"].items():
-        assert manifest["files"][name] == entry
+        if not name.startswith("imagine_"):  # the M1 sets; the mock rebuilds the imagine ones
+            assert manifest["files"][name] == entry
     assert manifest["files"]["imagine_train.jsonl.gz"]["rows"] == 930  # 2 per pair, none dropped
     assert manifest["files"]["imagine_val.jsonl.gz"]["rows"] == 465
     train = read_sft(tmp / "sft" / "imagine_train.jsonl.gz")
