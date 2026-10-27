@@ -16,6 +16,9 @@ set -eo pipefail
 export CONFIG="${1:-experiments/imagine.toml}"
 export REQUIRE_GPU=1 AGENT_GPUS=2 USER_GPUS=0
 source cluster/job_setup.sh
+# The teacher sits in the shared model folder, not in the agent group's folder of students (found
+# 10-27: job 64856349 stopped after 4 s, Ollama answering 404 for qwen3:32b).
+export AGENT_OLLAMA_MODELS="${USER_OLLAMA_MODELS:-$OLLAMA_MODELS}"
 source cluster/serve_models.sh
 trap stop_models EXIT
 # No user-group call is made, but Elicitor's client wants a server for both groups.
