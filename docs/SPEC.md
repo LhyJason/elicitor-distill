@@ -415,11 +415,12 @@ tests/         split guard, data, mock collection and SFT building, statistics o
 docs/SPEC.md  docs/figures/  results_summary/
 ```
 
-`src/` layout, pyproject + setuptools, ruff, pytest, GitHub Actions on Linux and Windows. CI
-runs the tests, `make-personas --check`, and (from M1) collection and SFT building on Elicitor's
+`src/` layout, pyproject + setuptools, ruff, pytest. The checks run locally before each commit:
+ruff, the tests, `make-personas --check`, and (from M1) collection and SFT building on Elicitor's
 mock provider (the CLI on the dev personas; the whole chain, backstories included, in the tests
-on a copy of `data/`); training is only exercised up to the trainer's construction (`--dry-run`), since
-CI downloads no weights.
+on a copy of `data/`); training is only exercised up to the trainer's construction (`--dry-run`),
+since the checks download no weights. The GitHub Actions workflow (Linux and Windows) ran these
+until 10-26 and was then removed.
 
 ## 9. Infrastructure
 
