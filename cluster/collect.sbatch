@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=distill-collect
 #SBATCH --gpus=4
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=160G
 #SBATCH --time=06:00:00

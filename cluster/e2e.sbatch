@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=distill-e2e
 #SBATCH --gpus=4
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=160G
 #SBATCH --time=04:00:00
@@ -9,9 +10,12 @@
 # GPU 0 serves the M2 models from the agent group's folder (AGENT_GPUS=1), one at a time: the
 # cluster's GPUs are in exclusive-process mode and Ollama runs each model in a process of its
 # own, so a second model cannot load beside the first (found 10-26: "CUDA-capable device(s) is/are
-# busy or unavailable"); Ollama swaps them on request. GPUs 1-3 serve the simulator llama3.3
-# (USER_GPUS=3), since only the simulator's answers to questions the teacher never asked are new. Elicitor's run folders (ELICITOR_RESULTS, default ~/elicitor/results:
-# m5_full, m5_smoke_calibration, m7_judge) are read, never written; their reply caches are copied.
+# busy or unavailable"); Ollama swaps them on request. --nodes=1: without it Slurm may split the
+# 4 GPUs across nodes (job 64819521 got 3 + 1, and GPU 3's server fell back to the CPU). GPUs
+# 1-3 serve the simulator llama3.3 (USER_GPUS=3), since only the simulator's answers to questions
+# the teacher never asked are new. Elicitor's run folders (ELICITOR_RESULTS, default
+# ~/elicitor/results: m5_full, m5_smoke_calibration, m7_judge) are read, never written; their
+# reply caches are copied.
 # Steps:
 #   1. `distill build-test`: the update and judge test sets (the first read of eval data);
 #   2. per model, one after another (the SFT students first): `elicitor calibrate` on the dev
