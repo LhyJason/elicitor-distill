@@ -1,0 +1,30 @@
+# Laptop demo (SPEC §9): Elicitor's interactive demo with the SFT 1.7B student as the belief
+# updater. You answer the questions in the terminal; no simulated user and no 70B model.
+#   ollama create elicitor-upd-1.7b-sft -f Modelfile      # the student's GGUF (not released)
+#   elicitor demo experiments/demo_student.toml --updater llm
+# Elicitor's demo.toml with the agent model swapped, and the eig selector's rho the student's
+# own (measured in M3, results_summary/m3/calibration.md), as in its end-to-end run file.
+
+name = "demo_student"
+domain = "travel"
+data_dir = "../data"
+seed = 1
+budgets = [5]
+tau = 0.9
+selectors = ["eig"]
+updaters = ["llm"]
+phrasers = ["tpl"]
+
+[selector.eig]
+rho = { open = 0.99, choice = 0.97, yesno = 0.84 }
+
+[llm]
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+num_ctx = 2048
+think = { agent = false }
+timeout = 300
+
+[llm.models]
+agent = "elicitor-upd-1.7b-sft"
+user = "elicitor-upd-1.7b-sft"  # unused: with template wording only the updater calls a model
